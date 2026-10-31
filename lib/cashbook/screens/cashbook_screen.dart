@@ -16,6 +16,7 @@ import '../services/cashbook_export_service.dart';
 import '../services/cashbook_legacy_import_service.dart';
 import '../widgets/bangla_digit_input_formatter.dart';
 import 'cashbook_entry_sheet.dart';
+import 'cashbook_statement_view.dart';
 import 'cashbook_debt_sheet.dart';
 import 'cashbook_accounts_screen.dart';
 import 'cashbook_voucher_gallery_screen.dart';
@@ -553,7 +554,7 @@ class _CashbookScreenState extends State<CashbookScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        title: Text(_titles[_tab]),
+        title: _tab == 0 ? _accountTitle() : Text(_titles[_tab]),
         actions: [
           if (_tab == 0)
             IconButton(
@@ -623,123 +624,70 @@ class _CashbookScreenState extends State<CashbookScreen> {
   }
 
   // ── ENTRIES TAB ───────────────────────────────────────
+  /// অ্যাপ বারের শিরোনাম: এখন যে হিসাব/মাসে আছো (যেমন "অক্টোবর ২০২৬ ▾") — ট্যাপ করলে হিসাব বদলানো/নতুন যোগ।
+  Widget _accountTitle() {
+    final acc = _activeAccount;
+    final name = acc == null ? 'ক্যাশবুক' : '${acc.icon}  ${acc.name}';
+    return PopupMenuButton<int>(
+      tooltip: 'হিসাব/মাস বদলাও',
+      color: AppTheme.bg2,
+      offset: const Offset(0, 44),
+      onSelected: (v) async {
+        if (v == -1) {
+          _addAccount();
+        } else if (v == -2) {
+          final picked = await Navigator.push<int>(context,
+              MaterialPageRoute(builder: (_) => CashbookAccountsScreen(activeAccountId: _activeAccountId)));
+          if (picked != null) {
+            setState(() => _activeAccountId = picked);
+            CashbookService.setLastAccountId(picked);
+          } else {
+            _load(); // নাম বদল/মুছে ফেলার পর ব্যালেন্স হালনাগাদ
+          }
+        } else {
+          setState(() => _activeAccountId = v);
+          CashbookService.setLastAccountId(v);
+        }
+      },
+      itemBuilder: (_) => [
+        for (final a in _accounts)
+          if (a.id != null)
+            PopupMenuItem<int>(
+              value: a.id!,
+              child: Text('${a.icon}  ${a.name}',
+                  style: TextStyle(
+                      fontWeight: a.id == _activeAccountId ? FontWeight.w800 : FontWeight.w500,
+                      color: a.id == _activeAccountId ? AppTheme.accent : AppTheme.textPrimary)),
+            ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<int>(value: -2, child: Text('📋 সব হিসাব ও ব্যালেন্স')),
+        const PopupMenuItem<int>(value: -1, child: Text('➕ নতুন হিসাব/মাস যোগ')),
+      ],
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
+        const Icon(Icons.arrow_drop_down),
+      ]),
+    );
+  }
+
+  // ── ENTRIES TAB ───────────────────────────────────────
+  // স্টেটমেন্ট-ধাঁচ: সব/দৈনিক/সাপ্তাহিক/মাসিক/বার্ষিক চিপ, জমা-খরচ আলাদা কলাম, প্রতি সারিতে চলতি ব্যালেন্স
+  // (বিস্তারিত: cashbook_statement_view.dart)। গ্লোবাল সার্চ চালু থাকলে সব হিসাবের মিলে-যাওয়া এন্ট্রির তালিকা।
   Widget _buildEntriesTab() {
-    final activeAccount = _accounts.firstWhere(
-        (a) => a.id == _activeAccountId,
-        orElse: () => CashbookAccount(name: '—', icon: '👛', createdAt: 0));
-    final ownEntries = _entries.where((e) => e.accountId == _activeAccountId).toList();
-    final balance = ownEntries.fold<double>(0, (s, e) => s + (e.type == 'in' ? e.amount : -e.amount));
-    final thisMonth = CashbookDB.todayIso().substring(0, 7);
-    final monthOwn = ownEntries.where((e) => e.date.startsWith(thisMonth));
-    final inSum = monthOwn.where((e) => e.type == 'in').fold<double>(0, (s, e) => s + e.amount);
-    final outSum = monthOwn.where((e) => e.type == 'out').fold<double>(0, (s, e) => s + e.amount);
-
-    final visible = _visibleEntries;
-
+    final own = _entries.where((e) => e.accountId == _activeAccountId).toList();
     return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-        child: Row(children: [
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: AppTheme.bg2,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  value: _accounts.any((a) => a.id == _activeAccountId) ? _activeAccountId : null,
-                  isExpanded: true,
-                  isDense: false,
-                  dropdownColor: AppTheme.bg2,
-                  icon: Icon(Icons.expand_more, color: AppTheme.textSecondary),
-                  items: _accounts.map((a) => DropdownMenuItem(
-                    value: a.id,
-                    child: Text('${a.icon}  ${a.name}',
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                  )).toList(),
-                  onChanged: (id) {
-                    if (id == null) return;
-                    setState(() => _activeAccountId = id);
-                    CashbookService.setLastAccountId(id);
-                  },
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Material(
-            color: AppTheme.bg2,
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: () async {
-                final picked = await Navigator.push<int>(context,
-                    MaterialPageRoute(builder: (_) => CashbookAccountsScreen(activeAccountId: _activeAccountId)));
-                if (picked != null) {
-                  setState(() => _activeAccountId = picked);
-                  CashbookService.setLastAccountId(picked);
-                } else {
-                  _load(); // balances may have changed via rename/delete
-                }
-              },
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.border)),
-                child: Icon(Icons.list_alt, color: AppTheme.textSecondary),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Material(
-            color: AppTheme.bg2,
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: _addAccount,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.border)),
-                child: Icon(Icons.add, color: AppTheme.accent),
-              ),
-            ),
-          ),
-        ]),
-      ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: AppTheme.bg2, borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${activeAccount.name} — মোট ব্যালেন্স', style: AppTheme.caption()),
-            const SizedBox(height: 4),
-            Text(_fmt(balance), style: AppTheme.display(size: 28, color: AppTheme.green)),
-            const SizedBox(height: 12),
-            Row(children: [
-              Expanded(child: _balancePill('এই মাসে জমা', _fmt(inSum), AppTheme.textPrimary)),
-              const SizedBox(width: 10),
-              Expanded(child: _balancePill('এই মাসে খরচ', _fmt(outSum), AppTheme.red)),
-            ]),
-          ]),
-        ),
-      ),
       if (_searchOpen)
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             TextField(
               controller: _searchCtrl,
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search, size: 20),
-                filled: true, fillColor: AppTheme.bg2,
+                hintText: 'সব হিসাবে খোঁজো…',
+                filled: true,
+                fillColor: AppTheme.bg2,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
             ),
@@ -749,47 +697,15 @@ class _CashbookScreenState extends State<CashbookScreen> {
             ),
           ]),
         ),
-      if (!_isGlobalSearch)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-          child: Row(children: [
-            _filterChip('সব', 'all'),
-            const SizedBox(width: 8),
-            _filterChip('জমা', 'in'),
-            const SizedBox(width: 8),
-            _filterChip('খরচ', 'out'),
-            const Spacer(),
-            if (_dateRange != null)
-              GestureDetector(
-                onTap: () => setState(() => _dateRange = null),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(99)),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.close, size: 13, color: Colors.white),
-                    SizedBox(width: 3),
-                    Icon(Icons.date_range, size: 15, color: Colors.white),
-                  ]),
-                ),
-              )
-            else
-              GestureDetector(
-                onTap: () async {
-                  final range = await showDateRangePicker(
-                    context: context, firstDate: DateTime(2015), lastDate: DateTime(2100),
-                    initialDateRange: DateTimeRange(start: DateTime.now().subtract(const Duration(days: 30)), end: DateTime.now()),
-                  );
-                  if (range != null) setState(() => _dateRange = range);
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(color: AppTheme.bg2, borderRadius: BorderRadius.circular(99), border: Border.all(color: AppTheme.border)),
-                  child: Icon(Icons.date_range, size: 16, color: AppTheme.textSecondary),
-                ),
+      Expanded(
+        child: _isGlobalSearch
+            ? _buildEntriesList(_visibleEntries)
+            : CashbookStatementView(
+                key: ValueKey(_activeAccountId),
+                entries: own,
+                onTapEntry: (e) => _openEntrySheet(entry: e),
               ),
-          ]),
-        ),
-      Expanded(child: _buildEntriesList(visible)),
+      ),
     ]);
   }
 
