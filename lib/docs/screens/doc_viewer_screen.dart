@@ -8,6 +8,7 @@ import '../../family/screens/family_ui.dart';
 import '../../reminder/models/reminder.dart' show bn, formatDateBn;
 import '../../widgets/app_theme.dart';
 import '../models/doc_models.dart';
+import '../services/doc_owners.dart';
 import '../services/docs_crypto.dart';
 import '../services/docs_service.dart';
 import 'doc_form_sheet.dart';
@@ -28,12 +29,32 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   Map<String, String> _fields = {};
   bool _showValues = false;
   final Map<String, Future<Uint8List>> _cache = {};
+  // একটাই পাতা আর সেটা PDF হলে সরাসরি স্ক্রিনেই PDF দেখাই (আলাদা করে খুলতে হয় না)।
+  String? _pdfPath;
+  String? _pdfError;
+  bool _showInfo = false;
+
+  bool get _singlePdf => _doc.pages.length == 1 && _doc.pages.first.isPdf;
 
   @override
   void initState() {
     super.initState();
     _doc = widget.doc;
     _loadFields();
+    _loadInlinePdf();
+  }
+
+  Future<void> _loadInlinePdf() async {
+    if (!_singlePdf) {
+      if (mounted) setState(() { _pdfPath = null; _pdfError = null; });
+      return;
+    }
+    try {
+      final f = await _tempFile(_doc.pages.first);
+      if (mounted) setState(() { _pdfPath = f.path; _pdfError = null; });
+    } catch (e) {
+      if (mounted) setState(() => _pdfError = '$e');
+    }
   }
 
   Future<void> _loadFields() async {
@@ -62,8 +83,10 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         setState(() {
           _doc = fresh.first;
           _showValues = false;
+          _pdfPath = null;
         });
         _loadFields();
+        _loadInlinePdf();
       }
     }
   }
@@ -110,7 +133,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
           IconButton(icon: const Icon(Icons.delete_outline_rounded), onPressed: _delete, tooltip: 'মুছো'),
         ],
       ),
-      body: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), children: [
+      body: _singlePdf ? _pdfBody(cat, tpl, d, shown) : ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), children: [
         fCard(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
@@ -118,7 +141,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
               const SizedBox(width: 10),
               Text(cat.$2, style: TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
               const SizedBox(width: 8),
-              fChip(_doc.isMine ? '🙋 ${_doc.ownerLabel}' : '👤 ${_doc.ownerLabel}', AppTheme.accent),
+              fChip('👤 ${DocOwners.keyOf(_doc)}', AppTheme.accent),
               const Spacer(),
               if (d != null)
                 fChip(
@@ -152,6 +175,74 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         ],
       ]),
     );
+  }
+
+  /// একটাই PDF থাকলে: ওপরে ছোট পরিচয়-সারি (নাম/মেয়াদ; "তথ্য" ট্যাপে নম্বর-নোট), নিচে বাকি পুরো জায়গা জুড়ে PDF।
+  Widget _pdfBody((String, String, List<String>) cat, DocTemplate tpl, int? d, List<MapEntry<String, String>> shown) {
+    final hasInfo = shown.isNotEmpty || _doc.note.isNotEmpty || _doc.numberEnc.isNotEmpty || _doc.expiry != null;
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 8, 2),
+        child: Row(children: [
+          Text(cat.$1, style: const TextStyle(fontSize: 20)),
+          const SizedBox(width: 8),
+          Flexible(child: fChip('👤 ${DocOwners.keyOf(_doc)}', AppTheme.accent)),
+          if (d != null) ...[
+            const SizedBox(width: 6),
+            Flexible(
+              child: fChip(
+                d < 0 ? 'মেয়াদ ${bn(-d)} দিন আগে শেষ' : (d == 0 ? 'আজ মেয়াদ শেষ' : 'মেয়াদ আর ${bn(d)} দিন'),
+                _expColor(d),
+              ),
+            ),
+          ],
+          const Spacer(),
+          if (hasInfo)
+            TextButton.icon(
+              onPressed: () => setState(() => _showInfo = !_showInfo),
+              icon: Icon(_showInfo ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 19),
+              label: const Text('তথ্য'),
+            ),
+        ]),
+      ),
+      if (_showInfo)
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.34),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: fCard(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (_doc.expiry != null)
+                  Text('মেয়াদ শেষ: ${formatDateBn(_doc.expiry!)}', style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5)),
+                for (var i = 0; i < shown.length; i++) _fieldRow(tpl, shown[i], first: i == 0),
+                if (_doc.note.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(_doc.note, style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.45)),
+                ],
+              ]),
+            ),
+          ),
+        ),
+      Expanded(
+        child: _pdfError != null
+            ? Center(child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('PDF খোলা যায়নি: $_pdfError', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.red)),
+              ))
+            : (_pdfPath == null
+                ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+                : PDFView(
+                    filePath: _pdfPath!,
+                    enableSwipe: true,
+                    swipeHorizontal: false,
+                    autoSpacing: true,
+                    pageFling: false,
+                    onError: (e) {
+                      if (mounted) setState(() => _pdfError = '$e');
+                    },
+                  )),
+      ),
+    ]);
   }
 
   Widget _fieldRow(DocTemplate tpl, MapEntry<String, String> e, {required bool first}) {

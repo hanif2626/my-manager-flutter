@@ -2,15 +2,17 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../family/screens/family_ui.dart';
-import '../../family/services/family_service.dart';
 import '../../reminder/models/reminder.dart' show bn, formatDateBn;
 import '../../widgets/app_theme.dart';
 import '../models/doc_models.dart';
+import '../services/doc_owners.dart';
 import '../services/docs_crypto.dart';
 import '../services/docs_service.dart';
 import 'doc_capture_flow.dart';
 import 'doc_image_editor.dart';
 import 'docs_picker.dart';
+
+const kPdfLabel = 'PDF ফাইল';
 
 String _size(int b) => b >= 1024 * 1024 ? '${(b / 1024 / 1024).toStringAsFixed(1)} MB' : '${(b / 1024).round()} KB';
 
@@ -46,8 +48,13 @@ Future<bool> showDocForm(
   String category = existing?.category ?? (custom ? (presetCategory ?? 'identity') : tpl.category);
   if (!docCategories.containsKey(category)) category = 'other';
   DateTime? expiry = existing?.expiry;
-  // কার ডকুমেন্ট: '' = আমি। বিকল্পগুলো ফ্যামিলি সদস্য + আগের ডকুমেন্টের নাম থেকে আসে।
+  // কার ডকুমেন্ট: বিকল্পগুলো ভল্টের নামের তালিকা (DocOwners) + আগের ডকুমেন্টের নাম থেকে আসে।
+  // মালিক ফাঁকা থাকা পুরনো ডকুমেন্ট "নিজের" নামে ধরা হয়; নতুন যোগে বাছা নামটাই আগে থেকে ঠিক থাকে।
   String owner = (existing?.owner ?? presetOwner ?? '').trim();
+  if (owner.isEmpty) {
+    final sel = DocOwners.selected();
+    owner = (existing == null && sel != null && sel != DocOwners.all) ? sel : DocOwners.self;
+  }
   final ownerOptions = <String>[];
   final ownerCtrl = TextEditingController();
   bool ownerOther = false;
@@ -78,6 +85,13 @@ Future<bool> showDocForm(
     }
   }
 
+  // একটাই PDF থাকা ডকুমেন্টে সামনে/পেছনের ঘর লাগে না — PDF-এ সবই থাকে।
+  if (existing != null && existing.pages.length == 1 && existing.pages.first.isPdf) {
+    slots
+      ..clear()
+      ..add(_Slot(kPdfLabel, old: existing.pages.first));
+  }
+
   final oldBytes = <String, Future<Uint8List>>{};
   Future<Uint8List> oldB(DocPage p) => oldBytes.putIfAbsent(p.fileId, () => DocsCrypto.readFile(p.fileId));
 
@@ -85,18 +99,13 @@ Future<bool> showDocForm(
     if (!ownersLoaded) {
       ownersLoaded = true;
       () async {
-        final names = <String>[];
-        void add(String n) {
-          n = n.trim();
-          if (n.isNotEmpty && n != kSelfOwnerLabel && !names.contains(n)) names.add(n);
-        }
+        final names = <String>[...DocOwners.saved()];
         try {
-          for (final m in await FamilyService.members()) { add(m.name); }
+          for (final n in DocOwners.withDocs(await DocsService.list())) {
+            if (!names.contains(n)) names.add(n);
+          }
         } catch (_) {}
-        try {
-          for (final d in await DocsService.list()) { add(d.owner); }
-        } catch (_) {}
-        add(owner);
+        if (owner.isNotEmpty && !names.contains(owner)) names.add(owner);
         ownerOptions
           ..clear()
           ..addAll(names);
@@ -122,8 +131,27 @@ Future<bool> showDocForm(
       if (ctx.mounted) setS(() => error = m);
     }
 
+    // ── PDF মোড: PDF বাছলে সব এক ফাইলে — সামনে/পেছনের আলাদা ঘর থাকে না ──
+    bool pdfMode() => slots.any((s) => s.filled && s.isPdf);
+
+    void resetTemplateSlots() {
+      slots.clear();
+      for (final l in tpl.pageLabels) {
+        slots.add(_Slot(l));
+      }
+    }
+
+    /// PDF সরিয়ে ছবি নেওয়ার আগে জিজ্ঞেস; true মানে এগোনো যাবে।
+    Future<bool> leavePdfMode() async {
+      if (!pdfMode()) return true;
+      final ok = await fConfirm(ctx, 'PDF বাদ দিয়ে ছবি নেবে?', 'এখন একটা PDF বাছা আছে। ছবি নিলে ওই PDF বাদ যাবে (সেভের আগে পর্যন্ত যেকোনো সময় ফেরানো যায়)।');
+      if (ok && ctx.mounted) setS(resetTemplateSlots);
+      return ok;
+    }
+
     // ── ছবি নেওয়া ──
     Future<void> captureAll(ImageSource src) async {
+      if (!await leavePdfMode()) return;
       setS(() => error = null);
       if (tpl.isFree) {
         final got = await DocCaptureFlow.run(ctx, src, startNumber: slots.length + 1);
@@ -149,6 +177,8 @@ Future<bool> showDocForm(
     }
 
     Future<void> slotPick(_Slot s, ImageSource src) async {
+      if (s.isPdf && !await leavePdfMode()) return;
+      if (s.isPdf) s = slots.isNotEmpty ? slots.first : s;
       try {
         final pg = await DocsPicker.image(src);
         if (pg != null && ctx.mounted) setS(() => s.fresh = pg);
@@ -175,6 +205,17 @@ Future<bool> showDocForm(
     }
 
     void slotClear(_Slot s) {
+      if (s.isPdf) {
+        // PDF মুছলে আবার ধরনের নিজস্ব ঘর (সামনে/পেছনে…) ফিরে আসে
+        setS(() {
+          if (tpl.isFree) {
+            slots.remove(s);
+          } else {
+            resetTemplateSlots();
+          }
+        });
+        return;
+      }
       setS(() {
         s.fresh = null;
         s.old = null;
@@ -186,6 +227,21 @@ Future<bool> showDocForm(
       try {
         final f = await DocsPicker.file();
         if (f == null || !ctx.mounted) return;
+        if (f.mime == 'application/pdf') {
+          // PDF-এ সব পাতা এক ফাইলে থাকে — তাই একটাই ঘর, সামনে/পেছনে আলাদা করা লাগে না।
+          final hasImages = slots.any((s) => s.filled && !s.isPdf);
+          if (hasImages && !await fConfirm(ctx, 'PDF দিয়ে বদলাবে?', 'PDF-এ সব পাতা এক ফাইলে থাকে। এখন যোগ করা ছবিগুলো বাদ যাবে।')) return;
+          if (!ctx.mounted) return;
+          setS(() {
+            slots
+              ..clear()
+              ..add(_Slot(kPdfLabel, fresh: f));
+            error = null;
+          });
+          return;
+        }
+        if (pdfMode() && !await leavePdfMode()) return;
+        if (!ctx.mounted) return;
         setS(() {
           final empties = slots.where((s) => !s.filled).toList();
           if (empties.isNotEmpty) {
@@ -246,7 +302,7 @@ Future<bool> showDocForm(
               Text(s.label, style: TextStyle(color: AppTheme.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w700)),
               const SizedBox(height: 2),
               Text(
-                s.filled ? '✓ ${_size(s.size)}' : 'এখনও ছবি নেই',
+                s.filled ? (s.isPdf ? '✓ PDF · ${_size(s.size)} · সব পাতা এই ফাইলেই' : '✓ ${_size(s.size)}') : 'এখনও ছবি নেই',
                 style: TextStyle(color: s.filled ? AppTheme.green : AppTheme.textMuted, fontSize: 11.5),
               ),
             ]),
@@ -279,13 +335,19 @@ Future<bool> showDocForm(
               onSelected: (v) {
                 if (v == 'cam') slotPick(s, ImageSource.camera);
                 if (v == 'gal') slotPick(s, ImageSource.gallery);
+                if (v == 'pdf') addFile();
                 if (v == 'del') slotClear(s);
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'cam', child: Text('ক্যামেরায় আবার তোলো')),
-                PopupMenuItem(value: 'gal', child: Text('গ্যালারি থেকে বদলাও')),
-                PopupMenuItem(value: 'del', child: Text('মুছে ফেলো')),
-              ],
+              itemBuilder: (_) => s.isPdf
+                  ? const [
+                      PopupMenuItem(value: 'pdf', child: Text('অন্য PDF বাছো')),
+                      PopupMenuItem(value: 'del', child: Text('মুছে ফেলো')),
+                    ]
+                  : const [
+                      PopupMenuItem(value: 'cam', child: Text('ক্যামেরায় আবার তোলো')),
+                      PopupMenuItem(value: 'gal', child: Text('গ্যালারি থেকে বদলাও')),
+                      PopupMenuItem(value: 'del', child: Text('মুছে ফেলো')),
+                    ],
             ),
           ],
         ]),
@@ -300,11 +362,6 @@ Future<bool> showDocForm(
       Text('কার ডকুমেন্ট?', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w800)),
       const SizedBox(height: 6),
       Wrap(spacing: 8, runSpacing: 4, children: [
-        ChoiceChip(
-          label: const Text('🙋 $kSelfOwnerLabel', style: TextStyle(fontSize: 12.5)),
-          selected: !ownerOther && owner.isEmpty,
-          onSelected: (_) => setS(() { owner = ''; ownerOther = false; }),
-        ),
         for (final n in ownerOptions)
           ChoiceChip(
             label: Text(n, style: const TextStyle(fontSize: 12.5)),
@@ -312,7 +369,7 @@ Future<bool> showDocForm(
             onSelected: (_) => setS(() { owner = n; ownerOther = false; }),
           ),
         ChoiceChip(
-          label: const Text('➕ অন্য কেউ', style: TextStyle(fontSize: 12.5)),
+          label: const Text('➕ নতুন নাম', style: TextStyle(fontSize: 12.5)),
           selected: ownerOther,
           onSelected: (_) => setS(() { ownerOther = true; ownerCtrl.text = ''; }),
         ),
@@ -323,7 +380,7 @@ Future<bool> showDocForm(
           controller: ownerCtrl,
           autofocus: true,
           textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(labelText: 'নাম (যেমন: স্ত্রী, বাবু, আম্মু)'),
+          decoration: const InputDecoration(labelText: 'যার ডকুমেন্ট তার নাম'),
         ),
       ],
       const SizedBox(height: 14),
@@ -401,13 +458,16 @@ Future<bool> showDocForm(
       Row(children: [
         Text('ছবি', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14.5, fontWeight: FontWeight.w800)),
         const SizedBox(width: 8),
-        if (!tpl.isFree)
+        if (!tpl.isFree && !pdfMode())
           fChip('${bn(filledCount)}/${bn(fixedCount)}', filledCount >= fixedCount ? AppTheme.green : AppTheme.textMuted),
+        if (pdfMode()) fChip('PDF', AppTheme.red),
       ]),
       const SizedBox(height: 4),
       Text(
-        tpl.isFree
-            ? 'ক্যামেরায় একটার পর একটা তোলা যাবে, গ্যালারি থেকে একসাথে অনেক বাছা যাবে। এনক্রিপ্ট হয়ে রাখা হবে।'
+        pdfMode()
+            ? 'একটা PDF বাছা আছে — এতে সব পাতা (সামনে-পেছনে সহ) এক ফাইলেই থাকে, আলাদা ছবি লাগবে না। এনক্রিপ্ট হয়ে রাখা হবে।'
+            : tpl.isFree
+            ? 'ক্যামেরায় একটার পর একটা তোলা যাবে, গ্যালারি থেকে একসাথে অনেক বাছা যাবে। PDF থাকলে একটা PDF-ই যথেষ্ট। এনক্রিপ্ট হয়ে রাখা হবে।'
             : (fixedCount > 1
                 ? '${bn(fixedCount)}টা ছবি লাগবে: ${tpl.pageLabels.join(' → ')}। একটা বাটনে চাপলে ধাপে ধাপে বলে দেবে।'
                 : '১টা ছবি তুলে বা বেছে নিলেই হবে। এনক্রিপ্ট হয়ে রাখা হবে।'),
@@ -433,12 +493,14 @@ Future<bool> showDocForm(
           ),
         ),
       ]),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
+      const SizedBox(height: 6),
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
           onPressed: saving ? null : addFile,
-          icon: const Icon(Icons.attach_file_rounded, size: 17),
-          label: const Text('PDF / ফাইল থেকে যোগ করো', style: TextStyle(fontSize: 12.5)),
+          icon: Icon(Icons.picture_as_pdf_rounded, size: 19, color: AppTheme.red),
+          label: const Text('PDF বাছো (সব পাতা এক ফাইলে)'),
         ),
       ),
       const SizedBox(height: 4),
@@ -469,6 +531,7 @@ Future<bool> showDocForm(
             d.expiry = showExpiry ? expiry : null;
             d.note = note.text.trim();
             d.owner = ownerOther ? ownerCtrl.text.trim() : owner;
+            if (d.owner.isNotEmpty) await DocOwners.add(d.owner); // তালিকায় না থাকলে যোগ
             final entries = <DocPageEntry>[
               for (final s in slots)
                 if (s.filled)

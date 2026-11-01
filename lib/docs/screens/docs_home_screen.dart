@@ -6,6 +6,7 @@ import '../../reminder/models/reminder.dart' show bn;
 import '../../services/auth_service.dart';
 import '../../widgets/app_theme.dart';
 import '../models/doc_models.dart';
+import '../services/doc_owners.dart';
 import '../services/docs_service.dart';
 import 'doc_form_sheet.dart';
 import 'doc_viewer_screen.dart';
@@ -29,7 +30,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
   List<VaultDoc> _docs = [];
   int _tray = 0; // আপলোডের জন্য প্রস্তুত ফাইলের সংখ্যা
   String _cat = 'all';
-  String? _owner; // null = সবার; '' = আমার; নইলে নির্দিষ্ট ব্যক্তি
+  String? _owner; // null = এখনো বাছা হয়নি (প্রথমবার); DocOwners.all = সবার; নইলে একজনের নাম
   final _search = TextEditingController();
 
   @override
@@ -38,6 +39,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
     WidgetsBinding.instance.addObserver(this);
     DocsService.changes.addListener(_load);
     DocsExport.trayChanges.addListener(_loadTray);
+    _owner = DocOwners.selected();
     _auth();
   }
 
@@ -93,10 +95,131 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
 
   Color _expColor(int d) => d < 0 ? AppTheme.red : (d <= 30 ? AppTheme.yellow : AppTheme.textSecondary);
 
+  Future<void> _setOwner(String v) async {
+    await DocOwners.select(v);
+    if (mounted) setState(() => _owner = v);
+  }
+
+  Future<void> _addOwner() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bg2,
+        title: const Text('নতুন নাম'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'যার ডকুমেন্ট তার নাম'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('বাতিল')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text('যোগ করো', style: TextStyle(color: AppTheme.accent)),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (name == null || name.isEmpty) return;
+    await DocOwners.add(name);
+    await _setOwner(name);
+  }
+
   Future<void> _add() async {
     final t = await showDocTypePicker(context);
     if (t == null || !mounted) return;
-    await showDocForm(context, template: t, presetCategory: _cat == 'all' ? null : _cat, presetOwner: _owner);
+    final preset = (_owner == null || _owner == DocOwners.all) ? null : _owner;
+    final saved = await showDocForm(context, template: t, presetCategory: _cat == 'all' ? null : _cat, presetOwner: preset);
+    if (!saved || !mounted) return;
+    // অন্য নামে যোগ করে থাকলে সেই নামের তালিকায় চলে যাই — যাতে নতুন ডকুমেন্টটা চোখে পড়ে।
+    final l = await DocsService.list();
+    if (l.isEmpty) return;
+    l.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final who = DocOwners.keyOf(l.first);
+    if (_owner != DocOwners.all && _owner != who) await _setOwner(who);
+  }
+
+  /// অ্যাপ বারের শিরোনাম: এখন কার ডকুমেন্ট দেখাচ্ছে (ড্রপডাউন) — নাম বদলাতে ট্যাপ করো।
+  Widget _ownerTitle() {
+    final name = _owner == DocOwners.all ? 'সবার ডকুমেন্ট' : (_owner ?? '');
+    final names = DocOwners.withDocs(_docs);
+    return PopupMenuButton<String>(
+      tooltip: 'কার ডকুমেন্ট?',
+      color: AppTheme.bg2,
+      offset: const Offset(0, 44),
+      onSelected: (v) {
+        if (v == '__add__') {
+          _addOwner();
+        } else {
+          _setOwner(v);
+        }
+      },
+      itemBuilder: (_) => [
+        for (final n in names)
+          PopupMenuItem<String>(
+            value: n,
+            child: Row(children: [
+              Icon(_owner == n ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  size: 18, color: _owner == n ? AppTheme.accent : AppTheme.textMuted),
+              const SizedBox(width: 10),
+              Expanded(child: Text(n, style: TextStyle(fontWeight: _owner == n ? FontWeight.w800 : FontWeight.w500))),
+              Text(bn(_docs.where((d) => DocOwners.keyOf(d) == n).length),
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+            ]),
+          ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(value: DocOwners.all, child: const Text('👥 সবার ডকুমেন্ট')),
+        const PopupMenuItem<String>(value: '__add__', child: Text('➕ নতুন নাম যোগ করো')),
+      ],
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Text('👤 '),
+        Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
+        const Icon(Icons.arrow_drop_down),
+      ]),
+    );
+  }
+
+  /// প্রথমবার ঢুকলে: কার ডকুমেন্ট দেখবে বাছো (না থাকলে নতুন নাম যোগ করো)।
+  Widget _firstPicker() {
+    final names = DocOwners.withDocs(_docs);
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 18, 16, 40), children: [
+      Text('কার ডকুমেন্ট দেখবে?',
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 6),
+      Text('নামটা বাছো — শুধু তার ডকুমেন্টই দেখাবে। পরে ওপরের নামে ট্যাপ করে বদলানো যাবে।',
+          style: TextStyle(color: AppTheme.textMuted, fontSize: 13, height: 1.4)),
+      const SizedBox(height: 14),
+      for (final n in names)
+        fCard(
+          onTap: () => _setOwner(n),
+          child: Row(children: [
+            Container(
+              width: 42, height: 42,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: AppTheme.accent.withOpacity(0.13), borderRadius: BorderRadius.circular(14)),
+              child: const Text('👤', style: TextStyle(fontSize: 20)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(n, style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+            ),
+            Text('${bn(_docs.where((d) => DocOwners.keyOf(d) == n).length)}টা',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5)),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right, color: AppTheme.textMuted),
+          ]),
+        ),
+      const SizedBox(height: 6),
+      OutlinedButton.icon(
+        onPressed: _addOwner,
+        icon: const Icon(Icons.person_add_alt_1_rounded),
+        label: const Text('তালিকায় নেই? নতুন নাম যোগ করো'),
+        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+      ),
+    ]);
   }
 
   @override
@@ -104,7 +227,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        title: const Text('ডকুমেন্ট ও সনদ'),
+        title: (_authed && _owner != null) ? _ownerTitle() : const Text('ডকুমেন্ট ও সনদ'),
         actions: [
           if (_authed)
             IconButton(
@@ -114,7 +237,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
             ),
         ],
       ),
-      floatingActionButton: _authed
+      floatingActionButton: (_authed && _owner != null)
           ? FloatingActionButton(
               backgroundColor: AppTheme.accent,
               foregroundColor: Colors.white,
@@ -150,10 +273,12 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
   }
 
   Widget _body() {
+    if (_owner == null) return _firstPicker();
+    // বাছা নামের ডকুমেন্টই (বা "সবার") — বাকি সব হিসাব (মেয়াদ, ক্যাটাগরি, সংখ্যা) এর ভেতর থেকেই
+    final scoped = _owner == DocOwners.all ? _docs : _docs.where((d) => DocOwners.keyOf(d) == _owner).toList();
     final q = _search.text.trim().toLowerCase();
-    final list = _docs.where((d) {
+    final list = scoped.where((d) {
       if (_cat != 'all' && d.category != _cat) return false;
-      if (_owner != null && d.owner.trim() != _owner) return false;
       if (q.isNotEmpty &&
           !d.title.toLowerCase().contains(q) &&
           !d.note.toLowerCase().contains(q) &&
@@ -161,11 +286,8 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
       return true;
     }).toList();
 
-    final expiring = _docs.where((d) => d.daysToExpiry != null && d.daysToExpiry! <= 30).length;
-    final cats = docCategories.keys.where((k) => _docs.any((d) => d.category == k)).toList();
-    // কার কার ডকুমেন্ট আছে ('' = আমি সবার আগে)। একজনের হলে ফিল্টার দেখানো হয় না।
-    final owners = <String>{for (final d in _docs) d.owner.trim()}.toList()
-      ..sort((a, b) => a.isEmpty ? -1 : (b.isEmpty ? 1 : a.compareTo(b)));
+    final expiring = scoped.where((d) => d.daysToExpiry != null && d.daysToExpiry! <= 30).length;
+    final cats = docCategories.keys.where((k) => scoped.any((d) => d.category == k)).toList();
 
     return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 90), children: [
       fCard(
@@ -213,7 +335,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
             ),
           ]),
         ),
-      if (_docs.length > 6)
+      if (scoped.length > 6)
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: TextField(
@@ -229,48 +351,23 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
             ),
           ),
         ),
-      if (owners.length > 1)
-        SizedBox(
-          height: 40,
-          child: ListView(scrollDirection: Axis.horizontal, children: [
-            _ownerChip(null, 'সবার'),
-            for (final o in owners)
-              _ownerChip(o, '${o.isEmpty ? '🙋 $kSelfOwnerLabel' : '👤 $o'} ${bn(_docs.where((d) => d.owner.trim() == o).length)}'),
-          ]),
-        ),
       if (cats.length > 1)
         SizedBox(
           height: 40,
           child: ListView(scrollDirection: Axis.horizontal, children: [
-            _chip('all', 'সব ${bn(_docs.length)}'),
+            _chip('all', 'সব ${bn(scoped.length)}'),
             for (final k in cats)
-              _chip(k, '${docCategories[k]!.$1} ${docCategories[k]!.$2} ${bn(_docs.where((d) => d.category == k).length)}'),
+              _chip(k, '${docCategories[k]!.$1} ${docCategories[k]!.$2} ${bn(scoped.where((d) => d.category == k).length)}'),
           ]),
         ),
-      if (_docs.isEmpty)
+      if (scoped.isEmpty)
         fEmpty(Icons.folder_special_outlined,
-            'কোনো ডকুমেন্ট নেই।\nনিচের + বাটনে ট্যাপ করে NID, জন্মনিবন্ধন, SSC/HSC সনদ, ছবি, স্বাক্ষর যোগ করো — ক্যামেরা বা গ্যালারি থেকে।')
+            '${_owner == DocOwners.all ? '' : '$_owner-এর '}কোনো ডকুমেন্ট নেই।\nনিচের + বাটনে ট্যাপ করে NID, জন্মনিবন্ধন, SSC/HSC সনদ, ছবি, স্বাক্ষর বা PDF যোগ করো।')
       else if (list.isEmpty)
         fEmpty(Icons.search_off_rounded, 'কিছু পাওয়া যায়নি')
       else
         for (final d in list) _docCard(d),
     ]);
-  }
-
-  Widget _ownerChip(String? key, String label) {
-    final sel = _owner == key;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8, bottom: 6),
-      child: ChoiceChip(
-        label: Text(label, style: TextStyle(color: sel ? Colors.white : AppTheme.textSecondary, fontSize: 12.5, fontWeight: FontWeight.w600)),
-        selected: sel,
-        showCheckmark: false,
-        selectedColor: AppTheme.accent,
-        backgroundColor: AppTheme.bg2,
-        side: BorderSide(color: sel ? AppTheme.accent : AppTheme.border),
-        onSelected: (_) => setState(() => _owner = key),
-      ),
-    );
   }
 
   Widget _chip(String key, String label) {
@@ -310,7 +407,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
             Text(d.title, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 14.5, fontWeight: FontWeight.w700)),
             const SizedBox(height: 3),
-            Text('${d.isMine ? '' : '👤 ${d.owner.trim()} · '}${cat.$2} · ${d.pages.isEmpty ? 'ফাইল নেই' : '${bn(d.pages.length)}টা পাতা'}${d.numberEnc.isNotEmpty ? ' · 🔢 নম্বর আছে' : ''}',
+            Text('${_owner == DocOwners.all ? '👤 ${DocOwners.keyOf(d)} · ' : ''}${cat.$2} · ${d.pages.isEmpty ? 'ফাইল নেই' : '${bn(d.pages.length)}টা পাতা'}${d.numberEnc.isNotEmpty ? ' · 🔢 নম্বর আছে' : ''}',
                 style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
           ]),
         ),
