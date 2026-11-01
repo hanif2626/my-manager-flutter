@@ -128,6 +128,64 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
     await _setOwner(name);
   }
 
+  /// বাছা নামটা বদলায় — ওই নামের সব ডকুমেন্টও নতুন নামে চলে যায় (ফাইল/নম্বর/রিমাইন্ডার যেমন ছিল তেমন)।
+  Future<void> _renameOwner() async {
+    final old = _owner;
+    if (old == null || old == DocOwners.all) return;
+    final ctrl = TextEditingController(text: old);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bg2,
+        title: const Text('নাম বদলাও'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'নতুন নাম', helperText: 'এই নামের সব ডকুমেন্ট নতুন নামে চলে যাবে'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('বাতিল')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text('বদলাও', style: TextStyle(color: AppTheme.accent)),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (name == null || name.isEmpty || name == old) return;
+    final n = await DocsService.renameOwner(old, name);
+    final finalName = await DocOwners.rename(old, name);
+    if (!mounted) return;
+    setState(() => _owner = finalName);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(n > 0 ? '"$old" → "$finalName": ${bn(n)}টা ডকুমেন্টের নাম বদলেছে' : 'নাম বদলেছে'),
+    ));
+  }
+
+  /// তালিকা থেকে নাম সরায় — শুধু যার কোনো ডকুমেন্ট নেই। ডকুমেন্ট থাকলে আগে সেগুলো অন্য নামে নিতে হবে (মোছা হয় না)।
+  Future<void> _removeOwner() async {
+    final name = _owner;
+    if (name == null || name == DocOwners.all) return;
+    final count = _docs.where((d) => DocOwners.keyOf(d) == name).length;
+    if (count > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('"$name"-এর ${bn(count)}টা ডকুমেন্ট আছে — সরানো যাবে না। আগে "নামটা বদলাও" দিয়ে অন্য নামে মেলাও বা ডকুমেন্টগুলো সরাও।'),
+      ));
+      return;
+    }
+    final ok = await DocOwners.remove(name);
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('অন্তত একটা নাম রাখতে হবে')));
+      }
+      return;
+    }
+    final sel = DocOwners.selected();
+    if (mounted) setState(() => _owner = sel);
+  }
+
   Future<void> _add() async {
     final t = await showDocTypePicker(context);
     if (t == null || !mounted) return;
@@ -153,6 +211,10 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
       onSelected: (v) {
         if (v == '__add__') {
           _addOwner();
+        } else if (v == '__rename__') {
+          _renameOwner();
+        } else if (v == '__remove__') {
+          _removeOwner();
         } else {
           _setOwner(v);
         }
@@ -173,6 +235,10 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
         const PopupMenuDivider(),
         PopupMenuItem<String>(value: DocOwners.all, child: const Text('👥 সবার ডকুমেন্ট')),
         const PopupMenuItem<String>(value: '__add__', child: Text('➕ নতুন নাম যোগ করো')),
+        if (_owner != DocOwners.all) ...[
+          PopupMenuItem<String>(value: '__rename__', child: Text('✏️ "$_owner" নামটা বদলাও')),
+          PopupMenuItem<String>(value: '__remove__', child: Text('🗑️ "$_owner" নামটা সরাও')),
+        ],
       ],
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         const Text('👤 '),

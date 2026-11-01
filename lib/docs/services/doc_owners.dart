@@ -45,6 +45,40 @@ class DocOwners {
     }
   }
 
+  static Future<void> _saveList(List<String> l) => SettingsService.setString(_kList, jsonEncode(l));
+
+  /// তালিকা থেকে নাম সরায় (যার কোনো ডকুমেন্ট নেই তার জন্যই)। ফেরত: সরানো গেল কি না।
+  static Future<bool> remove(String name) async {
+    final l = saved();
+    if (l.length <= 1) return false; // অন্তত একটা নাম থাকতে হবে
+    if (!l.remove(name)) return false;
+    await _saveList(l);
+    if (selected() == name) await SettingsService.setString(_kSel, l.first);
+    return true;
+  }
+
+  /// নাম বদলায় (তালিকা + বাছা নাম)। ডকুমেন্টের মালিক-নাম বদলায় [DocsService.renameOwner]।
+  /// নতুন নাম আগে থেকে তালিকায় থাকলে দুটো একসাথে মিশে যায়। ফেরত: প্রকৃত নতুন নাম।
+  static Future<String> rename(String oldName, String newName) async {
+    final n = newName.trim();
+    if (n.isEmpty || n == oldName) return oldName;
+    final l = saved();
+    final i = l.indexOf(oldName);
+    final dup = l.indexWhere((e) => e.toLowerCase() == n.toLowerCase());
+    if (i == -1) {
+      if (dup == -1) l.add(n);
+    } else if (dup != -1 && dup != i) {
+      l.removeAt(i); // আগের নামটা নতুন নামের সাথে মিশে গেল
+    } else {
+      l[i] = n;
+    }
+    await _saveList(l);
+    if (selected() == oldName) {
+      await SettingsService.setString(_kSel, dup != -1 && dup != i ? l[l.indexWhere((e) => e.toLowerCase() == n.toLowerCase())] : n);
+    }
+    return n;
+  }
+
   /// ডকুমেন্টটা কার — মালিক ফাঁকা (পুরনো ডকুমেন্ট) হলে "নিজের" নাম।
   static String keyOf(VaultDoc d) {
     final o = d.owner.trim();

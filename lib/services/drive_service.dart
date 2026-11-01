@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../db/db_helper.dart';
+import 'settings_service.dart';
 import 'safety_net.dart';
 
 class GoogleAuthClient extends http.BaseClient {
@@ -298,6 +300,24 @@ class DriveService {
 
   /// null → সাইন-ইন নেই / ফাইল নেই / ত্রুটি; কারণটা [lastError]-এ থাকে।
   Future<String?> restoreJson(String fileName, {BackupVersion? version}) async {
+    // প্রিভিউয়ে নামানো একই ভার্সন হলে আবার নামাই না
+    if (version != null && _previewKey == '$fileName|${version.key}' && _previewText != null) {
+      final t = _previewText;
+      _previewKey = null;
+      _previewText = null;
+      return t;
+    }
+    final bytes = await _downloadBytes(fileName, version);
+    if (bytes == null) return null;
+    try {
+      return utf8.decode(bytes);
+    } catch (e) {
+      lastError = 'ফাইল পড়া যায়নি: $e';
+      return null;
+    }
+  }
+
+  Future<List<int>?> _downloadBytes(String fileName, BackupVersion? version) async {
     // সাইন-ইন না থাকলে আগে চুপচাপ, না হলে অ্যাকাউন্ট বাছাইয়ের পর্দা — রিস্টোর হাতে চালানো কাজ।
     if (!await ensureSignedIn(interactive: true)) {
       lastError ??= 'Google Drive-এ সাইন-ইন করা নেই';
@@ -311,13 +331,6 @@ class DriveService {
         lastError ??= 'Backup ফোল্ডার খুঁজে পাওয়া যায়নি';
         return null;
       }
-      // প্রিভিউয়ে নামানো একই ভার্সন হলে আবার নামাই না
-      if (version != null && _previewKey == '$fileName|${version.key}' && _previewText != null) {
-        final t = _previewText;
-        _previewKey = null;
-        _previewText = null;
-        return t;
-      }
       final id = version?.fileId ?? await _findNewestFileId(fileName);
       if (id == null) {
         lastError = 'Drive-এর MyManager_Backup ফোল্ডারে $fileName নেই';
@@ -328,10 +341,10 @@ class DriveService {
           : await _driveApi!.files.get(id, downloadOptions: drive.DownloadOptions.fullMedia)) as drive.Media;
       final bytes = <int>[];
       await for (final chunk in media.stream) { bytes.addAll(chunk); }
-      return utf8.decode(bytes);
+      return bytes;
     } catch (e) {
       lastError = e.toString();
-      debugPrint('DriveService restoreJson error: $e');
+      debugPrint('DriveService download error: $e');
       return null;
     }
   }
@@ -369,21 +382,32 @@ class DriveService {
     return res;
   }
 
-  Future<DriveBackupResult> _uploadGuardedNow(String fileName, String jsonData) async {
-    final bytes = utf8.encode(jsonData);
+  Future<DriveBackupResult> _uploadGuardedNow(String fileName, String jsonData) =>
+      _uploadBytesNow(fileName, utf8.encode(jsonData), SafetyNet.itemCount(jsonData));
+
+  /// সব আপলোডের মূল সুরক্ষিত পথ (JSON ও বাইনারি — ডকুমেন্ট ব্যাকআপও এখান দিয়ে)।
+  ///  • [newCount] == 0 (তালিকা সব ফাঁকা) আর আগেরটায় ডেটা → আপলোড বন্ধ।
+  ///  • নতুনটা আগের অর্ধেকেরও কম → ঢাকার আগে সংরক্ষিত কপি।
+  ///  • আগের কপির বয়স ২৪ ঘণ্টার বেশি → প্রতিদিন অন্তত একবার সংরক্ষিত কপি (শেষ ৭টা থাকে) — যাতে ভুল/নষ্ট ডেটা
+  ///    ঢুকে গেলেও গত এক সপ্তাহের যেকোনো দিনের ভালো ব্যাকআপ ফেরানো যায়।
+  Future<DriveBackupResult> _uploadBytesNow(String fileName, List<int> bytes, int? newCount) async {
     final existingId = await _findNewestFileId(fileName);
     if (existingId != null) {
       try {
         final meta = await _driveApi!.files.get(existingId, $fields: 'size') as drive.File;
         final remoteSize = int.tryParse(meta.size ?? '') ?? 0;
-        final newCount = SafetyNet.itemCount(jsonData);
         if (newCount == 0 && remoteSize > bytes.length + 200) {
           lastError = '⚠️ অ্যাপে এখন কোনো ডেটা নেই, কিন্তু Drive-এর আগের ব্যাকআপে ডেটা আছে — ওটা ঢাকা হয়নি। '
               'আগের ডেটা ফিরে পেতে "ফিরিয়ে আনো" বা "পুরনো ভার্সন" চাপো।';
           return DriveBackupResult.failed;
         }
-        if (remoteSize >= 2000 && bytes.length * 2 < remoteSize) {
+        final shrink = remoteSize >= 2000 && bytes.length * 2 < remoteSize;
+        final dayKey = 'drive_copy_ms_$fileName';
+        final last = SettingsService.getInt(dayKey);
+        final dailyDue = DateTime.now().millisecondsSinceEpoch - last > 24 * 3600 * 1000;
+        if (shrink || (dailyDue && remoteSize > 200)) {
           await _saveCopy(existingId, fileName);
+          await SettingsService.setInt(dayKey, DateTime.now().millisecondsSinceEpoch);
         }
       } catch (e) {
         debugPrint('DriveService guard check failed: $e');
@@ -400,6 +424,58 @@ class DriveService {
     return DriveBackupResult.success;
   }
 
+  /// বাইনারি ফাইল (যেমন এনক্রিপ্টেড ডকুমেন্ট ব্যাকআপ) সুরক্ষিতভাবে আপলোড — নিজের আলাদা ফাইলে।
+  Future<DriveBackupResult> backupBytes(String fileName, Uint8List bytes) {
+    final run = _backupQueue.then((_) => _backupBytesNow(fileName, bytes));
+    _backupQueue = run.then((_) {}, onError: (_) {});
+    return run;
+  }
+
+  Future<DriveBackupResult> _backupBytesNow(String fileName, Uint8List bytes) async {
+    if (!await ensureSignedIn(interactive: true)) return DriveBackupResult.notSignedIn;
+    try {
+      lastError = null;
+      await _initApi();
+      _backupFolderId ??= await _ensureFolder();
+      if (_backupFolderId == null) {
+        lastError ??= 'Backup ফোল্ডার তৈরি/খুঁজে পাওয়া যায়নি';
+        return DriveBackupResult.failed;
+      }
+      return await _uploadBytesNow(fileName, bytes, null);
+    } catch (e) {
+      lastError = e.toString();
+      debugPrint('DriveService backupBytes error: $e');
+      return DriveBackupResult.failed;
+    }
+  }
+
+  /// বাইনারি ফাইল নামায় (null → ফাইল/সাইন-ইন নেই বা ত্রুটি; কারণ [lastError]-এ)।
+  Future<Uint8List?> restoreBytes(String fileName, {BackupVersion? version}) async {
+    final b = await _downloadBytes(fileName, version);
+    return b == null ? null : Uint8List.fromList(b);
+  }
+
+  /// ফোল্ডারে নামের শুরু [prefix] এমন ফাইলের তালিকা (সংরক্ষিত কপি বাদে), নতুন আগে।
+  Future<List<({String name, DateTime time, int size})>> listFilesWithPrefix(String prefix) async {
+    final out = <({String name, DateTime time, int size})>[];
+    if (!await ensureSignedIn(interactive: true)) return out;
+    try {
+      await _initApi();
+      _backupFolderId ??= await _ensureFolder();
+      if (_backupFolderId == null) return out;
+      final q = "name contains '$prefix' and '${_backupFolderId!}' in parents and trashed=false";
+      final list = await _driveApi!.files.list(q: q, $fields: 'files(name,modifiedTime,size)', orderBy: 'modifiedTime desc', pageSize: 100);
+      for (final f in list.files ?? const <drive.File>[]) {
+        final n = f.name ?? '';
+        if (!n.startsWith(prefix) || n.contains('.saved-')) continue;
+        out.add((name: n, time: f.modifiedTime?.toLocal() ?? DateTime.now(), size: int.tryParse(f.size ?? '') ?? 0));
+      }
+    } catch (e) {
+      lastError = e.toString();
+    }
+    return out;
+  }
+
   Future<void> _saveCopy(String fileId, String fileName) async {
     try {
       final t = DateTime.now();
@@ -413,7 +489,7 @@ class DriveService {
       final q = "name contains '$fileName.saved-' and '${_backupFolderId!}' in parents and trashed=false";
       final list = await _driveApi!.files.list(q: q, $fields: 'files(id,createdTime)', orderBy: 'createdTime desc', pageSize: 30);
       final old = list.files ?? const <drive.File>[];
-      for (var i = 5; i < old.length; i++) {
+      for (var i = 7; i < old.length; i++) {
         if (old[i].id != null) await _driveApi!.files.delete(old[i].id!);
       }
     } catch (e) {

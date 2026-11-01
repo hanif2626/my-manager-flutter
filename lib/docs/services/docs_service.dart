@@ -5,6 +5,7 @@ import '../../reminder/models/reminder.dart';
 import '../../reminder/services/reminder_service.dart';
 import '../db/docs_db.dart';
 import '../models/doc_models.dart';
+import 'doc_owners.dart';
 import 'docs_crypto.dart';
 
 /// নতুন যোগ হতে যাওয়া একটা পাতা (ছবি/PDF) — সেভের সময় এনক্রিপ্ট হয়ে ফাইলে যায়।
@@ -106,6 +107,24 @@ class DocsService {
     await DocsCrypto.deleteFile(old.fileId);
     changes.value++;
     return fresh;
+  }
+
+  /// [oldName]-এর সব ডকুমেন্টের মালিক-নাম [newName] করে। পুরনো ডকুমেন্ট (মালিক ফাঁকা) "নিজের" নামে ধরা হয়।
+  /// রিমাইন্ডার/ফাইল/নম্বর ছোঁয় না — শুধু মালিকের নাম। ফেরত: কয়টা ডকুমেন্ট বদলাল।
+  static Future<int> renameOwner(String oldName, String newName) async {
+    final n = newName.trim();
+    if (n.isEmpty) return 0;
+    var count = 0;
+    for (final d in await DocsDB.all()) {
+      final key = d.owner.trim().isEmpty ? DocOwners.self : d.owner.trim();
+      if (key != oldName) continue;
+      d.owner = n;
+      d.updatedAt = DateTime.now().millisecondsSinceEpoch;
+      await DocsDB.upsert(d);
+      count++;
+    }
+    if (count > 0) changes.value++;
+    return count;
   }
 
   static Future<void> delete(VaultDoc doc) async {

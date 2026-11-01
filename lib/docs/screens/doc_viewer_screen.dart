@@ -234,8 +234,9 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
                 : PDFView(
                     filePath: _pdfPath!,
                     enableSwipe: true,
-                    swipeHorizontal: false,
-                    autoSpacing: true,
+                    swipeHorizontal: false, // সাধারণ PDF রিডারের মতো ওপর-নিচে একটানা স্ক্রল
+                    autoSpacing: false,
+                    pageSnap: false,
                     pageFling: false,
                     onError: (e) {
                       if (mounted) setState(() => _pdfError = '$e');
@@ -414,7 +415,7 @@ class _PdfPageScreenState extends State<_PdfPageScreen> {
           ? Center(child: Text('PDF খোলা যায়নি: $_error', style: TextStyle(color: AppTheme.red)))
           : (_path == null
               ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
-              : PDFView(filePath: _path!, enableSwipe: true, autoSpacing: true, pageFling: true)),
+              : PDFView(filePath: _path!, enableSwipe: true, swipeHorizontal: false, autoSpacing: false, pageSnap: false, pageFling: false)),
     );
   }
 }
