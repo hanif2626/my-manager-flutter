@@ -6,6 +6,7 @@ import 'engine/bdgovtjob_source.dart';
 import 'engine/bn_util.dart';
 import 'engine/match_engine.dart';
 import 'engine/merge_items.dart';
+import 'radar_stars.dart';
 import 'engine/teletalk_radar.dart';
 import 'engine/teletalk_source.dart';
 import '../services/admit_watcher.dart';
@@ -252,6 +253,9 @@ class RadarRunner {
     state['items'] = items;
     state['lastRun'] = _today();
     state['lastRunAt'] = nowMs;
+    try {
+      await RadarStars.refreshFrom(feedItems); // স্টার-দেওয়া সার্কুলারের তথ্য তাজা রাখি
+    } catch (_) {}
     await _instantAlerts(state, feedItems, notify: alertNew && !report && RadarService.instantOn);
     if (report) {
       await _notify(feed);
@@ -449,15 +453,21 @@ class RadarRunner {
       return;
     }
     final feed = RadarService.cached();
-    if (feed == null) return;
     final now = DateTime.now();
     final hidden = RadarService.dismissed();
+    // ফিডের সার্কুলার + ⭐ স্টার-দেওয়াগুলো (ফিড থেকে সরে গেলেও শেষ তারিখের আগে সতর্ক করতে)
+    final pool = <RadarItem>[...?feed?.items];
+    for (final st in RadarStars.items()) {
+      final k = RadarStars.keysOf(st);
+      if (!pool.any((p) => RadarStars.keysOf(p).any(k.contains))) pool.add(st);
+    }
+    if (pool.isEmpty) return;
     var saved = <String>{};
     try {
       saved = (await JobService.circulars()).map((c) => c.url).where((u) => u.isNotEmpty).toSet();
     } catch (_) {}
 
-    final items = feed.items
+    final items = pool
         .where((i) =>
             i.deadline != null &&
             !hidden.contains(i.url) &&
