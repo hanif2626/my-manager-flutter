@@ -9,6 +9,9 @@ import '../services/app_launcher.dart';
 import '../services/job_service.dart';
 import 'engine/bn_util.dart' show monthNamesBn;
 import 'phone_alerts_sheet.dart';
+import '../profile/job_profile_screen.dart';
+import '../profile/job_tags.dart';
+import 'apply_flow.dart';
 import 'radar_pdf_viewer.dart';
 import 'radar_stars.dart';
 import 'phone_notif_service.dart';
@@ -27,13 +30,14 @@ class RadarTab extends StatefulWidget {
   State<RadarTab> createState() => _RadarTabState();
 }
 
-class _RadarTabState extends State<RadarTab> {
+class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
   RadarFeed? _feed;
   bool _loading = false;
   bool _showHidden = false;
   int _mode = 0; // 0 = আমার জন্য, 1 = সব সরকারি চাকরি (Teletalk)
   int _filter = 0; // 0 সব · 1 সম্ভাব্য যোগ্য · 2 ৭ দিনে শেষ · 3 নতুন
-  int _sort = 0; // 0 শেষ তারিখ আগে · 1 বেশি পদ আগে
+  int _sort = 0; // 0 শেষ তারিখ আগে · 1 বেশি পদ আগে · 2 ট্যাগ-মিল আগে
+  String? _tagSel; // _filter == 4 হলে: নির্দিষ্ট ট্যাগ (null = যেকোনো ট্যাগ)
   String? _error;
   Set<String> _saved = {};
   Set<String> _hidden = {}; // একবারই পড়ি — কার্ড বানানোর সময় প্রতিবার JSON ডিকোড করলে ধীর হতো
@@ -44,7 +48,23 @@ class _RadarTabState extends State<RadarTab> {
     super.initState();
     _feed = RadarService.cached();
     _hidden = RadarService.dismissed();
+    WidgetsBinding.instance.addObserver(this);
     _init();
+    // আবেদনের সাইট খুলে অ্যাপ বন্ধ হয়ে গিয়ে থাকলেও ফিরে এসে জিজ্ঞেস করবে
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ApplyFlow.askIfPending(context, widget.onSaved);
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) ApplyFlow.askIfPending(context, widget.onSaved);
   }
 
   Future<void> _init() async {
@@ -114,6 +134,7 @@ class _RadarTabState extends State<RadarTab> {
   List<RadarItem> _visible(List<RadarItem> all) {
     var list = _showHidden ? all : all.where((i) => !_hidden.contains(i.url)).toList();
     final fresh = _feed?.newUrls.toSet() ?? <String>{};
+    final tags = JobTags.all();
     switch (_filter) {
       case 1:
         list = list.where((i) => i.verdict == 'ok').toList();
@@ -124,10 +145,21 @@ class _RadarTabState extends State<RadarTab> {
       case 3:
         list = list.where((i) => fresh.contains(i.url)).toList();
         break;
+      case 4:
+        list = list.where((i) {
+          final m = JobTags.match(i, tags: tags);
+          return _tagSel == null ? m.isNotEmpty : m.contains(_tagSel);
+        }).toList();
+        break;
     }
     list = List.of(list);
     if (_sort == 1) {
       list.sort((a, b) => (b.totalVacancy ?? -1).compareTo(a.totalVacancy ?? -1));
+    } else if (_sort == 2) {
+      list.sort((a, b) {
+        final c = JobTags.match(b, tags: tags).length.compareTo(JobTags.match(a, tags: tags).length);
+        return c != 0 ? c : (a.daysLeft ?? 999).compareTo(b.daysLeft ?? 999);
+      });
     } else {
       list.sort((a, b) => (a.daysLeft ?? 999).compareTo(b.daysLeft ?? 999));
     }
@@ -159,6 +191,14 @@ class _RadarTabState extends State<RadarTab> {
               onPressed: () => setState(() => _showHidden = !_showHidden),
               child: Text(_showHidden ? 'লুকানো বাদ দাও' : 'লুকানো ${bn(_hidden.length)}টি'),
             ),
+          IconButton(
+            tooltip: 'আমার জব প্রোফাইল (ট্যাগ)',
+            icon: Icon(Icons.badge_outlined, color: AppTheme.textSecondary),
+            onPressed: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => const JobProfileScreen()));
+              if (mounted) setState(() {});
+            },
+          ),
           IconButton(
             tooltip: 'রিফ্রেশ',
             icon: _loading
@@ -267,6 +307,7 @@ class _RadarTabState extends State<RadarTab> {
       if (i.verdict == 'ok') ok++;
       if (i.daysLeft != null && i.daysLeft! <= 7) soon++;
     }
+    final myTags = JobTags.all();
     final fresh = _feed?.newUrls.toSet() ?? <String>{};
     final freshN = live.where((i) => fresh.contains(i.url)).length;
 
@@ -319,12 +360,38 @@ class _RadarTabState extends State<RadarTab> {
           fchip(2, '⏳ ৭ দিনে শেষ'),
           const SizedBox(width: 6),
           fchip(3, '🆕 নতুন${freshN > 0 ? ' (${bn(freshN)})' : ''}'),
+          if (myTags.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            ChoiceChip(
+              label: Text('🏷️ ট্যাগ', style: const TextStyle(fontSize: 12.5)),
+              selected: _filter == 4 && _tagSel == null,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => setState(() {
+                _filter = (_filter == 4 && _tagSel == null) ? 0 : 4;
+                _tagSel = null;
+              }),
+            ),
+            for (final t in myTags) ...[
+              const SizedBox(width: 6),
+              ChoiceChip(
+                label: Text(t.name, style: const TextStyle(fontSize: 12.5)),
+                selected: _filter == 4 && _tagSel == t.name,
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => setState(() {
+                  final same = _filter == 4 && _tagSel == t.name;
+                  _filter = same ? 0 : 4;
+                  _tagSel = same ? null : t.name;
+                }),
+              ),
+            ],
+          ],
           const SizedBox(width: 12),
           ActionChip(
-            avatar: Icon(_sort == 0 ? Icons.event : Icons.groups, size: 16),
-            label: Text(_sort == 0 ? 'শেষ তারিখ আগে' : 'বেশি পদ আগে', style: const TextStyle(fontSize: 12.5)),
+            avatar: Icon(_sort == 0 ? Icons.event : (_sort == 1 ? Icons.groups : Icons.sell_outlined), size: 16),
+            label: Text(_sort == 0 ? 'শেষ তারিখ আগে' : (_sort == 1 ? 'বেশি পদ আগে' : 'ট্যাগ-মিল আগে'),
+                style: const TextStyle(fontSize: 12.5)),
             visualDensity: VisualDensity.compact,
-            onPressed: () => setState(() => _sort = _sort == 0 ? 1 : 0),
+            onPressed: () => setState(() => _sort = (_sort + 1) % (myTags.isEmpty ? 2 : 3)),
           ),
         ]),
       ),
@@ -404,6 +471,7 @@ class _RadarTabState extends State<RadarTab> {
                           if (it.source == 'merged') _chip('✅ ${bn(1 + it.altUrls.length)}টি সূত্রে মেলানো', AppTheme.green),
                           if (it.notStartedYet) _chip('⏰ শুরু ${_dateShort(it.published!)}', AppTheme.yellow),
                           if (dl != null && dl < 0) _chip('মেয়াদ শেষ', AppTheme.red),
+                          for (final t in JobTags.match(it)) _chip('🏷️ $t', AppTheme.accent),
                         ]),
                       ),
                       _starButton(it),
@@ -494,6 +562,17 @@ class _RadarTabState extends State<RadarTab> {
                     ],
                     const SizedBox(height: 8),
                     Wrap(spacing: 6, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                      if (ApplyFlow.bestUrl(it).isNotEmpty && !(dl != null && dl < 0))
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            backgroundColor: AppTheme.green,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => ApplyFlow.open(context, it),
+                          icon: const Icon(Icons.rocket_launch_rounded, size: 17),
+                          label: const Text('আবেদন করো'),
+                        ),
                       saved
                           ? _chip('✔ সেভ করা আছে', AppTheme.textSecondary)
                           : FilledButton.tonal(

@@ -6,6 +6,7 @@ import 'engine/bdgovtjob_source.dart';
 import 'engine/bn_util.dart';
 import 'engine/match_engine.dart';
 import 'engine/merge_items.dart';
+import '../profile/job_tags.dart';
 import 'radar_stars.dart';
 import 'engine/teletalk_radar.dart';
 import 'engine/teletalk_source.dart';
@@ -311,7 +312,8 @@ class RadarRunner {
       final dl = i.daysLeftAt(ref);
       final when = dl == null ? '' : (dl == 0 ? 'আজই শেষ!' : 'আর ${toBnStr(dl)} দিন');
       final vac = i.totalVacancy == null ? '' : '${toBnStr(i.totalVacancy)} পদ';
-      final meta = [vac, when].where((e) => e.isNotEmpty).join(' · ');
+      final tg = JobTags.match(i);
+      final meta = [vac, when, if (tg.isNotEmpty) '🏷️ ${tg.join(', ')}'].where((e) => e.isNotEmpty).join(' · ');
       final mark = fresh.contains(i.url) ? '🆕' : (dl != null && dl <= 3 ? '🔥' : (i.verdict == 'ok' ? '🟢' : '🟡'));
       final name = i.org.isNotEmpty ? i.org : i.title;
       lines.add('$mark $name${meta.isEmpty ? '' : '\n    $meta'}');
