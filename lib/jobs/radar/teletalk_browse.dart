@@ -8,7 +8,9 @@ import 'engine/bn_util.dart' show fmtDateBn, todayDhaka, daysBetween;
 import 'engine/match_engine.dart' show postRelevance;
 import 'engine/teletalk_radar.dart' show teletalkAgeCheck;
 import 'engine/teletalk_source.dart';
+import 'radar_models.dart';
 import 'radar_pdf_viewer.dart';
+import 'radar_stars.dart';
 import 'radar_service.dart';
 
 /// Teletalk AllJobs-এর মতো তালিকা: সব চলমান সরকারি চাকরি, সার্চ ও ফিল্টারসহ।
@@ -66,6 +68,25 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
   bool _mine(TeletalkJob j) => postRelevance('${j.titleBn} ${j.titleEn}', RadarService.profile()) == 'yes';
 
   int? _daysLeft(TeletalkJob j) => j.deadline == null ? null : daysBetween(todayDhaka(), j.deadline!);
+
+  /// তালিকার একটা চাকরি → স্টার-তালিকার সার্কুলার (পুরো তথ্যসহ)।
+  RadarItem _asItem(TeletalkJob j) {
+    final org = j.orgNameBn.isNotEmpty ? j.orgNameBn : j.orgName;
+    final title = j.titleBn.isNotEmpty ? j.titleBn : j.titleEn;
+    final mine = _mine(j);
+    DateTime? day(DateTime? d) => d == null ? null : DateTime(d.year, d.month, d.day);
+    return RadarItem(
+      url: '${j.detailsUrl}#teletalk',
+      title: '$org (Teletalk)',
+      verdict: mine ? 'ok' : 'warn',
+      org: org,
+      deadline: day(j.deadline),
+      method: 'অনলাইন — ${j.applyUrl}',
+      posts: [RadarPost(title: title, count: j.vacancy, verdict: mine ? 'ok' : 'warn', checks: const [])],
+      published: day(j.published),
+      source: 'teletalk',
+    );
+  }
 
   Future<void> _watch(TeletalkJob j) async {
     final org = j.orgNameBn.isNotEmpty ? j.orgNameBn : j.orgName;
@@ -232,10 +253,29 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
           border: Border.all(color: mine ? AppTheme.green.withOpacity(0.6) : AppTheme.border),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Wrap(spacing: 8, runSpacing: 6, children: [
-            if (mine) _chip('🎯 আমার পদ', AppTheme.green),
-            if (d != null) _chip(d == 0 ? 'আজই শেষ' : 'আর ${bn(d)} দিন', _urgency(d)),
-            if (notStarted) _chip('আবেদন শুরু ${fmtDateBn(j.published!)}', AppTheme.accent),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: Wrap(spacing: 8, runSpacing: 6, children: [
+                if (mine) _chip('🎯 আমার পদ', AppTheme.green),
+                if (d != null) _chip(d == 0 ? 'আজই শেষ' : 'আর ${bn(d)} দিন', _urgency(d)),
+                if (notStarted) _chip('আবেদন শুরু ${fmtDateBn(j.published!)}', AppTheme.accent),
+              ]),
+            ),
+            InkResponse(
+              radius: 24,
+              onTap: () async {
+                final on = await RadarStars.toggle(_asItem(j));
+                if (!mounted) return;
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(on ? '⭐ স্টার দেওয়া হয়েছে — "⭐ স্টার" ট্যাবে পাবে' : 'স্টার তোলা হয়েছে')));
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6, bottom: 2),
+                child: Icon(RadarStars.isStarred(_asItem(j)) ? Icons.star_rounded : Icons.star_outline_rounded,
+                    size: 28, color: RadarStars.isStarred(_asItem(j)) ? Colors.amber : AppTheme.textMuted),
+              ),
+            ),
           ]),
           const SizedBox(height: 8),
           Text(j.titleBn.isNotEmpty ? j.titleBn : j.titleEn,
