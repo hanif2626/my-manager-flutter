@@ -26,7 +26,7 @@ class RadarService {
   static const _kDismissed = 'radar_dismissed';
 
   /// ব্যাকআপে যাবে এমন কী।
-  static const backupKeys = [kDob, kEdu, kSubject, kTypBn, kTypEn, kDaily, kReportTime, kInstant, kDeadline, kKwInclude, kKwExclude, 'admit_watch_on'];
+  static const backupKeys = [kDob, kEdu, kSubject, kTypBn, kTypEn, kDaily, kReportTime, kInstant, kDeadline, kKwInclude, kKwExclude, 'admit_watch_on', 'radar_starred'];
 
   static const eduLevels = <String, String>{
     'ssc': 'এসএসসি / সমমান',
