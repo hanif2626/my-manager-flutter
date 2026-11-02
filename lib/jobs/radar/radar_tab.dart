@@ -10,6 +10,7 @@ import '../services/job_service.dart';
 import 'engine/bn_util.dart' show monthNamesBn;
 import 'phone_alerts_sheet.dart';
 import 'radar_pdf_viewer.dart';
+import 'radar_stars.dart';
 import 'phone_notif_service.dart';
 import 'radar_models.dart';
 import 'radar_runner.dart';
@@ -196,6 +197,11 @@ class _RadarTabState extends State<RadarTab> {
             selected: _mode == 1,
             onSelected: (_) => setState(() => _mode = 1),
           ),
+          ChoiceChip(
+            label: Text('⭐ স্টার${RadarStars.count > 0 ? ' ${bn(RadarStars.count)}' : ''}'),
+            selected: _mode == 2,
+            onSelected: (_) => setState(() => _mode = 2),
+          ),
         ]),
       ),
       if (_error != null && _mode == 0)
@@ -205,6 +211,8 @@ class _RadarTabState extends State<RadarTab> {
         ),
       if (_mode == 1)
         Expanded(child: TeletalkBrowse(onSaved: widget.onSaved))
+      else if (_mode == 2)
+        Expanded(child: _starredBody())
       else
         Expanded(
           child: _feed == null
@@ -387,12 +395,18 @@ class _RadarTabState extends State<RadarTab> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Wrap(spacing: 6, runSpacing: 6, children: [
-                      _chip(ok ? '🟢 সম্ভাব্য যোগ্য' : '🟡 যাচাই বাকি', ok ? AppTheme.green : AppTheme.yellow),
-                      if (isNew) _chip('🆕 নতুন', AppTheme.accent),
-                      if (it.source == 'teletalk') _chip('Teletalk', AppTheme.textSecondary),
-                      if (it.source == 'merged') _chip('✅ ${bn(1 + it.altUrls.length)}টি সূত্রে মেলানো', AppTheme.green),
-                      if (it.notStartedYet) _chip('⏰ শুরু ${_dateShort(it.published!)}', AppTheme.yellow),
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Expanded(
+                        child: Wrap(spacing: 6, runSpacing: 6, children: [
+                          _chip(ok ? '🟢 সম্ভাব্য যোগ্য' : '🟡 যাচাই বাকি', ok ? AppTheme.green : AppTheme.yellow),
+                          if (isNew) _chip('🆕 নতুন', AppTheme.accent),
+                          if (it.source == 'teletalk') _chip('Teletalk', AppTheme.textSecondary),
+                          if (it.source == 'merged') _chip('✅ ${bn(1 + it.altUrls.length)}টি সূত্রে মেলানো', AppTheme.green),
+                          if (it.notStartedYet) _chip('⏰ শুরু ${_dateShort(it.published!)}', AppTheme.yellow),
+                          if (dl != null && dl < 0) _chip('মেয়াদ শেষ', AppTheme.red),
+                        ]),
+                      ),
+                      _starButton(it),
                     ]),
                     const SizedBox(height: 8),
                     Text(it.org.isNotEmpty ? it.org : it.title,
@@ -413,7 +427,7 @@ class _RadarTabState extends State<RadarTab> {
                           total != null ? AppTheme.accent : AppTheme.textSecondary),
                       const SizedBox(width: 8),
                       tile('📅', 'শেষ তারিখ', it.deadline == null ? 'অজানা' : _dateShort(it.deadline!),
-                          dl == null ? '' : (dl == 0 ? 'আজই শেষ!' : 'আর ${bn(dl)} দিন'), urgency),
+                          dl == null ? '' : (dl < 0 ? 'শেষ হয়ে গেছে' : (dl == 0 ? 'আজই শেষ!' : 'আর ${bn(dl)} দিন')), urgency),
                       const SizedBox(width: 8),
                       tile('💰', 'ফি', it.fee.isEmpty ? '—' : it.fee, it.fee.isEmpty ? 'বিজ্ঞপ্তিতে দেখো' : '', AppTheme.textPrimary),
                     ]),
@@ -538,6 +552,49 @@ class _RadarTabState extends State<RadarTab> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _starButton(RadarItem it) {
+    final on = RadarStars.isStarred(it);
+    return InkResponse(
+      radius: 24,
+      onTap: () async {
+        final now = await RadarStars.toggle(it);
+        if (!mounted) return;
+        setState(() {});
+        _snack(now ? '⭐ স্টার দেওয়া হয়েছে — "⭐ স্টার" ট্যাবে সহজে পাবে, শেষ তারিখের আগে সতর্কও করব' : 'স্টার তোলা হয়েছে');
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(left: 6, top: 0, bottom: 2),
+        child: Icon(on ? Icons.star_rounded : Icons.star_outline_rounded, size: 28, color: on ? Colors.amber : AppTheme.textMuted),
+      ),
+    );
+  }
+
+  /// ⭐ স্টার-দেওয়া সার্কুলার — ফিড থেকে সরে গেলেও এখানে থাকে; চলমান আগে, মেয়াদ-শেষ সবার শেষে।
+  Widget _starredBody() {
+    final list = RadarStars.items();
+    if (list.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.star_outline_rounded, size: 52, color: AppTheme.textMuted),
+            const SizedBox(height: 12),
+            Text('এখনো কোনো সার্কুলারে স্টার দেওয়া হয়নি',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 15, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text('যেকোনো সার্কুলারের কার্ডের ডানে ওপরের ☆ চাপলে সেটা এখানে জমা থাকবে — পরে সহজে খুঁজে পাবে, শেষ তারিখের আগে সতর্কও আসবে।',
+                textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5, height: 1.45)),
+          ]),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 90),
+      itemCount: list.length,
+      itemBuilder: (_, i) => _itemCard(list[i]),
     );
   }
 
