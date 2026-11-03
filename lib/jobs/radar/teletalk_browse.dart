@@ -8,6 +8,8 @@ import 'engine/bn_util.dart' show fmtDateBn, todayDhaka, daysBetween;
 import 'engine/match_engine.dart' show postRelevance;
 import 'engine/teletalk_radar.dart' show teletalkAgeCheck;
 import 'engine/teletalk_source.dart';
+import '../profile/big_hiring.dart';
+import 'apply_flow.dart';
 import 'radar_models.dart';
 import 'radar_pdf_viewer.dart';
 import 'radar_stars.dart';
@@ -30,6 +32,7 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
   bool _loading = false;
   String? _error;
   _Filter _filter = _Filter.all;
+  bool _bigFirst = true; // 📌 বড় নিয়োগ তালিকার একদম ওপরে
   final _q = TextEditingController();
 
   @override
@@ -82,6 +85,7 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
       org: org,
       deadline: day(j.deadline),
       method: 'অনলাইন — ${j.applyUrl}',
+      applyUrl: j.applyUrl,
       posts: [RadarPost(title: title, count: j.vacancy, verdict: mine ? 'ok' : 'warn', checks: const [])],
       published: day(j.published),
       source: 'teletalk',
@@ -145,6 +149,18 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
     if (_filter == _Filter.soon3 || _filter == _Filter.soon7) {
       list.sort((a, b) => (_daysLeft(a) ?? 999).compareTo(_daysLeft(b) ?? 999));
     }
+    if (_bigFirst && _filter != _Filter.soon3 && _filter != _Filter.soon7) {
+      // বড় নিয়োগ (বেশি পদ/পছন্দের শব্দ) সবার আগে, বড় সংখ্যা আগে; বাকিরা API-র নতুন-আগে ক্রমেই
+      final thr = BigHiring.threshold;
+      final ws = BigHiring.words;
+      final big = <TeletalkJob>[];
+      final rest = <TeletalkJob>[];
+      for (final j in list) {
+        (BigHiring.classify(j, thr: thr, ws: ws).big ? big : rest).add(j);
+      }
+      big.sort((a, b) => (b.vacancy ?? 0).compareTo(a.vacancy ?? 0));
+      return [...big, ...rest];
+    }
     return list; // API ইতিমধ্যে নতুন-আগে ক্রমে আসে
   }
 
@@ -188,6 +204,14 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
             _fchip('🎯 আমার পদ (${bn(mineCount)})', _Filter.mine),
             _fchip('৩ দিনে শেষ', _Filter.soon3),
             _fchip('৭ দিনে শেষ', _Filter.soon7),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, right: 8, top: 4, bottom: 4),
+              child: FilterChip(
+                label: const Text('📌 বড় নিয়োগ আগে', style: TextStyle(fontSize: 12.5)),
+                selected: _bigFirst,
+                onSelected: (v) => setState(() => _bigFirst = v),
+              ),
+            ),
           ],
         ),
       ),
@@ -242,6 +266,7 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
     final saved = _saved.contains(_key(j));
     final org = j.orgNameBn.isNotEmpty ? j.orgNameBn : j.orgName;
     final notStarted = j.published != null && daysBetween(todayDhaka(), j.published!) > 0;
+    final big = BigHiring.classify(j);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Container(
@@ -250,12 +275,16 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
         decoration: BoxDecoration(
           color: AppTheme.bg2,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: mine ? AppTheme.green.withOpacity(0.6) : AppTheme.border),
+          border: Border.all(
+              color: big.big ? Colors.amber.withOpacity(0.8) : (mine ? AppTheme.green.withOpacity(0.6) : AppTheme.border),
+              width: big.big ? 1.6 : 1),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(
               child: Wrap(spacing: 8, runSpacing: 6, children: [
+                if (big.big)
+                  _chip(j.vacancy != null && j.vacancy! >= BigHiring.threshold ? '📌 বড় নিয়োগ · ${bn(j.vacancy!)}টি পদ' : '📌 ${big.why}', Colors.amber),
                 if (mine) _chip('🎯 আমার পদ', AppTheme.green),
                 if (d != null) _chip(d == 0 ? 'আজই শেষ' : 'আর ${bn(d)} দিন', _urgency(d)),
                 if (notStarted) _chip('আবেদন শুরু ${fmtDateBn(j.published!)}', AppTheme.accent),
@@ -298,14 +327,11 @@ class _TeletalkBrowseState extends State<TeletalkBrowse> {
             saved
                 ? _chip('✔ সেভ করা আছে', AppTheme.textSecondary)
                 : FilledButton.tonal(onPressed: () => _watch(j), child: const Text('🔔 সেভ ও রিমাইন্ডার')),
-            TextButton(
-              onPressed: () async {
-                final ok = await AppLauncher.openUrl(j.applyUrl);
-                if (!ok && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('লিংক খোলা যায়নি')));
-                }
-              },
-              child: const Text('🔗 আবেদন'),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, backgroundColor: AppTheme.green, foregroundColor: Colors.white),
+              onPressed: (d != null && d < 0) ? null : () => ApplyFlow.open(context, _asItem(j)),
+              icon: const Icon(Icons.rocket_launch_rounded, size: 17),
+              label: const Text('আবেদন করো'),
             ),
             TextButton(onPressed: () => _showDetail(j), child: const Text('📄 শর্ত ও PDF')),
           ]),

@@ -98,6 +98,7 @@ RadarItem _mergeGroup(List<RadarItem> g) {
     source: 'merged',
     altUrls: others,
     adFile: ordered.map((e) => e.adFile).firstWhere((a) => a.isNotEmpty, orElse: () => ''),
+    applyUrl: ordered.map((e) => e.applyUrl).firstWhere((a) => a.isNotEmpty, orElse: () => ''),
   );
 }
 

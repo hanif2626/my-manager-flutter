@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../reminder/models/reminder.dart' show bn;
 import '../../widgets/app_theme.dart';
 import '../radar/radar_service.dart';
+import 'big_hiring.dart';
 import 'job_tags.dart';
 
 /// আমার জব প্রোফাইল। এখন: 🏷️ ট্যাগ (সার্কুলার ফিল্টার/অগ্রাধিকারের জন্য)।
@@ -14,11 +15,15 @@ class JobProfileScreen extends StatefulWidget {
 
 class _JobProfileScreenState extends State<JobProfileScreen> {
   List<JobTag> _tags = [];
+  List<String> _bigWords = [];
+  int _bigThr = BigHiring.defaultThreshold;
 
   @override
   void initState() {
     super.initState();
     _tags = JobTags.all();
+    _bigWords = List.of(BigHiring.words);
+    _bigThr = BigHiring.threshold;
   }
 
   Future<void> _save() async {
@@ -113,6 +118,112 @@ class _JobProfileScreenState extends State<JobProfileScreen> {
     await _save();
   }
 
+  Future<void> _editThreshold() async {
+    final ctrl = TextEditingController(text: '$_bigThr');
+    final v = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bg2,
+        title: const Text('কত পদ থেকে "বড় নিয়োগ"?'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'কমপক্ষে পদসংখ্যা', hintText: 'যেমন: ১০০'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('বাতিল')),
+          TextButton(
+            onPressed: () {
+              const bd = '০১২৩৪৫৬৭৮৯';
+              var t = ctrl.text.trim();
+              for (var i = 0; i < 10; i++) {
+                t = t.replaceAll(bd[i], '$i');
+              }
+              Navigator.pop(ctx, int.tryParse(t));
+            },
+            child: Text('সেভ', style: TextStyle(color: AppTheme.accent)),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (v == null || v < 1) return;
+    await BigHiring.setThreshold(v);
+    if (mounted) setState(() => _bigThr = v);
+  }
+
+  Future<void> _addBigWord() async {
+    final ctrl = TextEditingController();
+    final w = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bg2,
+        title: const Text('বড় নিয়োগের শব্দ'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'প্রতিষ্ঠান/পদের নামের শব্দ',
+            hintText: 'যেমন: প্রাথমিক, নিবন্ধিত, সমাজসেবা',
+            helperText: 'এই শব্দ থাকলে পদসংখ্যা যাই হোক সার্কুলারটা বড় নিয়োগ হিসেবে সামনে আসবে',
+            helperMaxLines: 2,
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('বাতিল')),
+          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: Text('যোগ করো', style: TextStyle(color: AppTheme.accent))),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (w == null || w.length < 2) return;
+    if (_bigWords.any((e) => e.toLowerCase() == w.toLowerCase())) return;
+    setState(() => _bigWords.add(w));
+    await BigHiring.setWords(_bigWords);
+  }
+
+  Widget _bigHiringCard() => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.amber.withOpacity(0.09),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.amber.withOpacity(0.4)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('📌 বড় নিয়োগ', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text('অনেক পদে লোক নেওয়া হচ্ছে এমন সার্কুলার (শিক্ষক নিয়োগ, সমাজসেবা…) "সব সরকারি চাকরি" তালিকার ওপরে হলুদ চিহ্নসহ আসে।',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5, height: 1.45)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: Text('কমপক্ষে ${bn(_bigThr)}টি পদ হলেই বড় নিয়োগ', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700))),
+            TextButton(onPressed: _editThreshold, child: const Text('বদলাও')),
+          ]),
+          const SizedBox(height: 4),
+          Text('এছাড়া নামে এই শব্দ থাকলেও (পদসংখ্যা যাই হোক):', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final w in _bigWords)
+              InputChip(
+                label: Text(w, style: const TextStyle(fontSize: 12.5)),
+                visualDensity: VisualDensity.compact,
+                onDeleted: () async {
+                  setState(() => _bigWords.remove(w));
+                  await BigHiring.setWords(_bigWords);
+                },
+              ),
+            ActionChip(
+              avatar: const Icon(Icons.add, size: 16),
+              label: const Text('শব্দ যোগ', style: TextStyle(fontSize: 12.5)),
+              visualDensity: VisualDensity.compact,
+              onPressed: _addBigWord,
+            ),
+          ]),
+        ]),
+      );
+
   Future<void> _delete(int i) async {
     final t = _tags[i];
     final ok = await showDialog<bool>(
@@ -145,6 +256,7 @@ class _JobProfileScreenState extends State<JobProfileScreen> {
         label: const Text('নতুন ট্যাগ'),
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 100), children: [
+        _bigHiringCard(),
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(

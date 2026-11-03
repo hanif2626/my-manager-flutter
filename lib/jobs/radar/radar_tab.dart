@@ -7,7 +7,9 @@ import '../../services/notification_service.dart';
 import '../services/admit_watcher.dart';
 import '../services/app_launcher.dart';
 import '../services/job_service.dart';
-import 'engine/bn_util.dart' show monthNamesBn;
+import 'engine/bn_util.dart' show monthNamesBn, daysBetween, todayDhaka;
+import 'engine/teletalk_source.dart' show TeletalkJob;
+import '../profile/big_hiring.dart';
 import 'phone_alerts_sheet.dart';
 import '../profile/job_profile_screen.dart';
 import '../profile/job_tags.dart';
@@ -296,6 +298,56 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
     return '$part ${bn(h12)}:${bn(m.toString().padLeft(2, '0'))}';
   }
 
+  /// 📌 বড় নিয়োগ (বেশি পদ/পছন্দের শব্দ) চলছে — "আমার জন্য" তালিকার ওপরেই জানান দেয়; চাপলে সব তালিকায় নিয়ে যায়।
+  Widget _bigBanner() {
+    final thr = BigHiring.threshold;
+    final ws = BigHiring.words;
+    final today = todayDhaka();
+    final list = RadarService.teletalkAll().where((j) {
+      if (j.deadline != null && daysBetween(today, j.deadline!) < 0) return false;
+      return BigHiring.classify(j, thr: thr, ws: ws).big;
+    }).toList()
+      ..sort((a, b) => (b.vacancy ?? 0).compareTo(a.vacancy ?? 0));
+    if (list.isEmpty) return const SizedBox.shrink();
+    String line(TeletalkJob j) {
+      final name = j.titleBn.isNotEmpty ? j.titleBn : j.titleEn;
+      final org = j.orgNameBn.isNotEmpty ? j.orgNameBn : j.orgName;
+      final d = j.deadline == null ? null : daysBetween(today, j.deadline!);
+      return '• $name${j.vacancy != null ? ' — ${bn(j.vacancy!)}টি পদ' : ''}${d == null ? '' : ' · ${d == 0 ? 'আজই শেষ' : 'আর ${bn(d)} দিন'}'}\n   $org';
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => setState(() => _mode = 1),
+      child: Container(
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.amber.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.amber.withOpacity(0.55)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(
+              child: Text('📌 ${bn(list.length)}টি বড় নিয়োগ চলছে',
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 14.5, fontWeight: FontWeight.w800)),
+            ),
+            Text('সব দেখো ›', style: TextStyle(color: AppTheme.accent, fontSize: 12.5, fontWeight: FontWeight.w700)),
+          ]),
+          const SizedBox(height: 6),
+          for (final j in list.take(3))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(line(j), style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5, height: 1.35)),
+            ),
+          if (list.length > 3)
+            Text('… আরও ${bn(list.length - 3)}টি', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+        ]),
+      ),
+    );
+  }
+
   // ── সারাংশ কার্ড + ফিল্টার ──
   Widget _header(List<RadarItem> all) {
     final live = all.where((i) => !_hidden.contains(i.url)).toList();
@@ -331,6 +383,7 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
         );
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _bigBanner(),
       Container(
         margin: const EdgeInsets.only(top: 6, bottom: 10),
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),

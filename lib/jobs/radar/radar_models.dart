@@ -56,6 +56,7 @@ class RadarItem {
   final String source; // teletalk | web | merged (একাধিক উৎস মেলানো)
   final List<String> altUrls; // একই সার্কুলারের অন্য উৎসের লিংক
   final String adFile; // Teletalk-এর বিজ্ঞপ্তি-PDF পাথ (এক ট্যাপে PDF খুলতে)
+  final String applyUrl; // আবেদনের সাইটের ঠিকানা (জানা থাকলে)
 
   const RadarItem({
     required this.url,
@@ -71,6 +72,7 @@ class RadarItem {
     this.source = 'web',
     this.altUrls = const [],
     this.adFile = '',
+    this.applyUrl = '',
   });
 
   factory RadarItem.fromMap(Map<String, dynamic> m) {
@@ -93,6 +95,7 @@ class RadarItem {
       source: (m['source'] as String?) ?? 'web',
       altUrls: ((m['alt'] as List?) ?? const []).map((e) => e.toString()).toList(),
       adFile: (m['ad'] as String?) ?? '',
+      applyUrl: (m['applyUrl'] as String?) ?? '',
     );
   }
 
@@ -110,6 +113,7 @@ class RadarItem {
         'source': source,
         'alt': altUrls,
         'ad': adFile,
+        'applyUrl': applyUrl,
       };
 
   /// সব পদ মিলিয়ে মোট পদসংখ্যা — কোনো পদেরই সংখ্যা জানা না থাকলে null।

@@ -105,6 +105,7 @@ List<RadarItem> teletalkItems(
       adNo: adNo,
       source: 'teletalk',
       adFile: adFile,
+      applyUrl: first.applyUrl,
     ));
   });
   return items;
