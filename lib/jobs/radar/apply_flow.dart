@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../../reminder/models/reminder.dart' show bn;
 import '../../services/settings_service.dart';
 import '../../widgets/app_theme.dart';
@@ -38,12 +39,74 @@ class ApplyFlow {
     return (label: '⚠️ অচেনা সাইট — ঠিকানা বিজ্ঞপ্তির সাথে মিলিয়ে নাও', color: AppTheme.yellow, official: false);
   }
 
-  /// আবেদনের আগের নিশ্চিতকরণ-শিট; "সাইট খোলো" চাপলে ফর্ম খোলে আর ফিরে এলে জিজ্ঞেস করার জন্য মনে রাখে।
+  // ── সরাসরি আবেদন-ফর্মের লিংক ──
+  //
+  // Teletalk-এর প্রতিটা প্রতিষ্ঠানের সাইট প্রথমে একটা "মাঝের পাতা" দেখায় (বিজ্ঞপ্তি ডাউনলোড + "Application Form
+  // (Click here to Apply Online)" লিংক); আসল আবেদন শুরু হয় তার পরের পাতায়। সেই পাতার লিংক খুঁজে সরাসরি সেখানে নিয়ে যাই।
+  // নিরাপত্তা: পাওয়া লিংক Teletalk/gov.bd বা একই সাইটের না হলে নিই না; আর না পেলে মাঝের পাতাই খুলি।
+
+  static final Map<String, ({String? apply, String? ad})> _directCache = {};
+
+  static Future<({String? apply, String? ad})> resolveDirect(String landing) async {
+    final hit = _directCache[landing];
+    if (hit != null) return hit;
+    final r = await _resolve(landing);
+    if (r.apply != null || r.ad != null) _directCache[landing] = r;
+    return r;
+  }
+
+  static bool _trusted(Uri link, Uri base) {
+    final h = link.host.toLowerCase();
+    if (h == base.host.toLowerCase()) return true;
+    return h == 'teletalk.com.bd' || h.endsWith('.teletalk.com.bd') || h.endsWith('.gov.bd');
+  }
+
+  static Future<({String? apply, String? ad})> _resolve(String landing) async {
+    final u = Uri.tryParse(landing);
+    if (u == null || u.host.isEmpty) return (apply: null, ad: null);
+    // http সাইট আগে https-এ চেষ্টা (অ্যান্ড্রয়েড সাধারণ http অনুরোধ আটকায়), না হলে যেমন আছে
+    final tries = <Uri>[if (u.scheme == 'http') u.replace(scheme: 'https'), u];
+    for (final t in tries) {
+      try {
+        final res = await http.get(t, headers: {
+          'user-agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36',
+          'accept': 'text/html,*/*',
+          'accept-language': 'en,bn;q=0.8',
+        }).timeout(const Duration(seconds: 7));
+        if (res.statusCode != 200) continue;
+        return _parseLinks(utf8.decode(res.bodyBytes, allowMalformed: true), t);
+      } catch (_) {}
+    }
+    return (apply: null, ad: null);
+  }
+
+  static ({String? apply, String? ad}) _parseLinks(String html, Uri base) {
+    final anchors = RegExp(r'''<a\b[^>]*?href\s*=\s*["']([^"']*)["'][^>]*>(.*?)</a>''', caseSensitive: false, dotAll: true);
+    final applyRe = RegExp(r'application\s*form|apply\s*online', caseSensitive: false);
+    final adRe = RegExp(r'advertisement|download\s*circular', caseSensitive: false);
+    String? apply;
+    String? ad;
+    for (final m in anchors.allMatches(html)) {
+      final href = (m.group(1) ?? '').trim();
+      if (href.isEmpty || href.startsWith('#') || href.toLowerCase().startsWith('javascript:')) continue;
+      final text = (m.group(2) ?? '').replaceAll(RegExp(r'<[^>]+>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+      Uri? link;
+      try {
+        link = base.resolve(href);
+      } catch (_) {}
+      if (link == null || !(link.scheme == 'http' || link.scheme == 'https') || !_trusted(link, base)) continue;
+      if (apply == null && applyRe.hasMatch(text)) apply = link.toString();
+      if (ad == null && adRe.hasMatch(text)) ad = link.toString();
+    }
+    return (apply: apply, ad: ad);
+  }
+
+  /// আবেদনের আগের নিশ্চিতকরণ-শিট; "ফর্ম খোলো" চাপলে ফর্ম খোলে আর ফিরে এলে জিজ্ঞেস করার জন্য মনে রাখে।
   static Future<void> open(BuildContext context, RadarItem it) async {
     final url = bestUrl(it);
     final dl = it.daysLeft;
     final expired = dl != null && dl < 0;
-    final info = siteInfo(url);
+    final direct = url.isEmpty ? Future.value((apply: null as String?, ad: null as String?)) : resolveDirect(url);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -72,67 +135,97 @@ class ApplyFlow {
               _line('⏰', 'আবেদন শুরু ${fmtDateBn(it.published!)} — এখনো শুরু হয়নি, ফর্ম খুললেও জমা নিতে না-ও পারে', AppTheme.yellow),
             if (it.fee.isNotEmpty) _line('💰', 'ফি: ${it.fee}', AppTheme.textSecondary),
             const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.bg.withOpacity(0.6),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: info.color.withOpacity(0.5)),
-              ),
-              child: url.isEmpty
-                  ? Text('⚠️ এই সার্কুলারে আবেদনের লিংক পাওয়া যায়নি। "বিজ্ঞপ্তি PDF" দেখে আবেদনের ঠিকানা মিলিয়ে নাও।',
-                      style: TextStyle(color: AppTheme.yellow, fontSize: 13, height: 1.4))
-                  : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('আবেদনের সাইট', style: TextStyle(color: AppTheme.textMuted, fontSize: 11.5)),
-                      const SizedBox(height: 2),
-                      SelectableText(host(url), style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 4),
-                      Text(info.label, style: TextStyle(color: info.color, fontSize: 12.5, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 4),
-                      Text('শুধু এই ঠিকানাতেই তথ্য দাও। বিজ্ঞপ্তির ঠিকানার সাথে না মিললে খুলো না।',
-                          style: TextStyle(color: AppTheme.textMuted, fontSize: 12, height: 1.4)),
-                    ]),
-            ),
-            const SizedBox(height: 10),
-            Text('হাতের কাছে রাখো: ছবি ও স্বাক্ষর (মাপ অনুযায়ী) · জাতীয় পরিচয়পত্র/জন্মনিবন্ধন · সব শিক্ষাগত সনদ ও নম্বরপত্র · ফি দেওয়ার মোবাইল ব্যাংকিং',
-                style: TextStyle(color: AppTheme.textMuted, fontSize: 12, height: 1.45)),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                onPressed: (expired || url.isEmpty)
-                    ? null
-                    : () async {
-                        await _setPending(it);
-                        final ok = await AppLauncher.openUrl(url);
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (!ok && context.mounted) {
-                          await clearPending();
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('লিংক খোলা যায়নি')));
-                        }
+            FutureBuilder<({String? apply, String? ad})>(
+              future: direct,
+              builder: (ctx, snap) {
+                final resolving = url.isNotEmpty && snap.connectionState != ConnectionState.done;
+                final found = snap.data?.apply;
+                final target = found ?? url;
+                final info = siteInfo(target);
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.bg.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: info.color.withOpacity(0.5)),
+                    ),
+                    child: url.isEmpty
+                        ? Text('⚠️ এই সার্কুলারে আবেদনের লিংক পাওয়া যায়নি। "বিজ্ঞপ্তি PDF" দেখে আবেদনের ঠিকানা মিলিয়ে নাও।',
+                            style: TextStyle(color: AppTheme.yellow, fontSize: 13, height: 1.4))
+                        : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(found != null ? 'আবেদন ফর্ম (সরাসরি)' : 'আবেদনের সাইট',
+                                style: TextStyle(color: AppTheme.textMuted, fontSize: 11.5)),
+                            const SizedBox(height: 2),
+                            SelectableText(host(target), style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 4),
+                            Text(info.label, style: TextStyle(color: info.color, fontSize: 12.5, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 6),
+                            if (resolving)
+                              Row(children: [
+                                const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text('সরাসরি আবেদন ফর্মের লিংক খোঁজা হচ্ছে…',
+                                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                                ),
+                              ])
+                            else if (found != null)
+                              Text('✅ মাঝের পাতা বাদ দিয়ে সরাসরি আবেদন ফর্মে যাবে।',
+                                  style: TextStyle(color: AppTheme.green, fontSize: 12, height: 1.4))
+                            else
+                              Text('সরাসরি ফর্মের লিংক পাওয়া যায়নি — সাইট খুলে "Application Form (Click here to Apply Online)" লিংকে চাপো।',
+                                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12, height: 1.4)),
+                            const SizedBox(height: 4),
+                            Text('শুধু এই ঠিকানাতেই তথ্য দাও। বিজ্ঞপ্তির ঠিকানার সাথে না মিললে খুলো না।',
+                                style: TextStyle(color: AppTheme.textMuted, fontSize: 12, height: 1.4)),
+                          ]),
+                  ),
+                  const SizedBox(height: 10),
+                  Text('হাতের কাছে রাখো: ছবি ও স্বাক্ষর (মাপ অনুযায়ী) · জাতীয় পরিচয়পত্র/জন্মনিবন্ধন · সব শিক্ষাগত সনদ ও নম্বরপত্র · ফি দেওয়ার মোবাইল ব্যাংকিং',
+                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12, height: 1.45)),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: (expired || url.isEmpty || resolving)
+                          ? null
+                          : () async {
+                              await _setPending(it);
+                              final ok = await AppLauncher.openUrl(target);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (!ok && context.mounted) {
+                                await clearPending();
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('লিংক খোলা যায়নি')));
+                              }
+                            },
+                      icon: const Icon(Icons.open_in_new_rounded),
+                      label: Text(expired ? 'মেয়াদ শেষ' : (found != null ? 'আবেদন ফর্ম খোলো' : 'আবেদনের সাইট খোলো')),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                      onPressed: () {
+                        final ad = snap.data?.ad;
+                        Navigator.pop(ctx);
+                        openRadarPdf(context,
+                            title: it.org.isNotEmpty ? it.org : it.title, adFile: it.adFile, pageUrl: it.url, directUrl: ad);
                       },
-                icon: const Icon(Icons.open_in_new_rounded),
-                label: Text(expired ? 'মেয়াদ শেষ' : 'আবেদনের সাইট খোলো'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  openRadarPdf(context, title: it.org.isNotEmpty ? it.org : it.title, adFile: it.adFile, pageUrl: it.url);
-                },
-                icon: Icon(Icons.picture_as_pdf_rounded, color: AppTheme.red),
-                label: const Text('আগে বিজ্ঞপ্তি PDF দেখো'),
-              ),
+                      icon: Icon(Icons.picture_as_pdf_rounded, color: AppTheme.red),
+                      label: const Text('আগে বিজ্ঞপ্তি PDF দেখো'),
+                    ),
+                  ),
+                ]);
+              },
             ),
           ]),
         ),
