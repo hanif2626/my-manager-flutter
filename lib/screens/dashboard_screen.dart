@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import '../services/bubble_picker.dart';
 import '../db/db_helper.dart';
 import '../models/project.dart';
 import '../widgets/app_theme.dart';
@@ -51,7 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _importProject() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await BubblePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['zip'],
         withData: false,

@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
@@ -30,7 +31,6 @@ import io.flutter.embedding.engine.dart.DartExecutor.DartEntrypoint
 import io.flutter.plugin.common.MethodChannel
 import kotlin.math.hypot
 import kotlin.math.max
-import kotlin.math.min
 
 /**
  * Messenger-এর চ্যাট হেডের মতো ভাসমান বাবল — নিজের ফোরগ্রাউন্ড সার্ভিস।
@@ -41,10 +41,10 @@ import kotlin.math.min
  * রিসাইজ-গ্লিচ আর Vivo-তে আটকে যাওয়া। এখানে:
  * - ডট (dotView): নেটিভ Android ভিউ। ড্র্যাগ, ট্যাপ, কিনারায় স্ন্যাপ —
  *   সব নেটিভে। Flutter-এর সঙ্গে এর কোনো সম্পর্ক নেই, তাই আটকায় না।
- * - প্যানেল (panelView): আলাদা FlutterView, নিজের FlutterEngine-এ
- *   `bubbleMain()` চালায়। ডটে ট্যাপ করলে দেখায়/লুকায়; ডট তখনো
- *   স্ক্রিনে থাকে, তাই আবার ট্যাপ করলেই প্যানেল লুকিয়ে যায়। পুরো অ্যাপ
- *   খোলে না — প্যানেলটাই অন্য অ্যাপের ওপরে ভাসে।
+ * - ভাসমান উইন্ডো (panelView): আলাদা FlutterView, নিজের FlutterEngine-এ
+ *   `bubbleMain()` চালায় — ভেতরে ছোট প্যানেল নয়, পুরো অ্যাপটাই
+ *   (MyManagerApp)। ডটে ট্যাপ করলে দেখায়/লুকায়; ডট তখনো স্ক্রিনে
+ *   থাকে (উইন্ডোর উপরেও), তাই আবার ট্যাপ করলেই উইন্ডো লুকিয়ে যায়।
  * - বন্ধ-চিহ্ন (dismissView): শুধু ড্র্যাগ করার সময় নিচের মাঝখানে
  *   দেখা যায়। ডটটা তার ওপরে ছাড়লেই বাবল বন্ধ (enabled=false লিখে
  *   সার্ভিস থামে)।
@@ -53,8 +53,8 @@ import kotlin.math.min
  * প্যানেল FLAG_NOT_TOUCH_MODAL + ফোকাসেবল (TextField-এ কিবোর্ড আসে,
  * বাইরে ট্যাপ করলে নিচের অ্যাপও টাচ পায়)।
  *
- * ডাটা: প্যানেলের engine আলাদা isolate — মূল অ্যাপের মেমরি/DB হ্যান্ডল
- * এখানে নেই। প্যানেল নিজে SQLite ফাইল খুলে একটাই ছোট insert/update করে,
+ * ডাটা: উইন্ডোর engine আলাদা isolate — মূল অ্যাপের মেমরি/DB হ্যান্ডল
+ * এখানে নেই। উইন্ডোর অ্যাপ নিজে একই SQLite ফাইল খোলে (ছোট লেনদেন),
  * আর মূল অ্যাপ DataSync-এর ২ সেকেন্ডের পোল + resume-চেকে তা ধরে ফেলে —
  * তাই engine-দুটোর মধ্যে কোনো বার্তা পাঠানোর দরকার নেই।
  */
@@ -235,11 +235,75 @@ class BubbleService : Service() {
                             openApp()
                             result.success(true)
                         }
-                        // সেভের খবর: মূল অ্যাপ DataSync-এর পোলে নিজেই ধরে
-                        // ফেলে, তাই এখানে কিছু করার নেই — শুধু স্বীকার করা।
-                        "noteSaved" -> result.success(true)
                         else -> result.notImplemented()
                     }
+                }
+            }
+        // ভেতরে এখন পুরো অ্যাপ চলে — তাই মূল অ্যাপের ইঞ্জিনে যেসব চ্যানেল
+        // আছে, সেগুলো বাবলের ইঞ্জিনেও লাগবে, নইলে সেটিংস টগল, স্ক্রিনটাইম,
+        // জব নোটিফিকেশন আর অ্যাপ খোলা — কিছুই কাজ করবে না।
+        // ScreenTimeBridge/JobNotifBridge শুধু Context নেয় — সরাসরি চলে।
+        ScreenTimeBridge.register(eng, applicationContext)
+        JobNotifBridge.register(eng, applicationContext)
+        // বাবল নিয়ন্ত্রণ (MainActivity-র মতোই, শুধু সেটিংস খোলাটা
+        // Service-এর Context দিয়ে — Activity এখানে নেই)।
+        MethodChannel(eng.dartExecutor.binaryMessenger, BubbleControl.CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isOverlayGranted" -> result.success(BubbleControl.isOverlayGranted(applicationContext))
+                    "isBubbleEnabled" -> result.success(BubbleControl.isBubbleEnabled(applicationContext))
+                    "isBubbleRunning" -> result.success(BubbleControl.isBubbleRunning())
+                    "openOverlaySettings" -> {
+                        BubbleControl.openOverlaySettingsFromService(applicationContext)
+                        result.success(true)
+                    }
+                    "startBubble" -> result.success(BubbleControl.startBubble(applicationContext))
+                    "stopBubble" -> {
+                        BubbleControl.stopBubble(applicationContext)
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        // অ্যাপ খোলা / ডায়াল / লিংক (MainActivity-র মতোই, শুধু
+        // applicationContext দিয়ে — Service-এ Activity নেই)।
+        MethodChannel(eng.dartExecutor.binaryMessenger, "com.hanif.mymanager/launcher")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "launchApp" -> {
+                        val pkg = call.argument<String>("package")
+                        val intent = pkg?.let { applicationContext.packageManager.getLaunchIntentForPackage(it) }
+                        if (intent != null) {
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            applicationContext.startActivity(intent)
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
+                    "dial" -> {
+                        val number = call.argument<String>("number")
+                        try {
+                            val i = Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number ?: "")))
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            applicationContext.startActivity(i)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "openUrl" -> {
+                        val url = call.argument<String>("url")
+                        try {
+                            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            applicationContext.startActivity(i)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    else -> result.notImplemented()
                 }
             }
     }
@@ -333,7 +397,7 @@ class BubbleService : Service() {
                 } else if (event.actionMasked == MotionEvent.ACTION_UP &&
                     event.eventTime - downTime < 400
                 ) {
-                    // ট্যাপ (ড্র্যাগ নয়): প্যানেল টগল — পুরো অ্যাপ খোলে না।
+                    // ট্যাপ (ড্র্যাগ নয়): ভাসমান উইন্ডো টগল — পুরো অ্যাপ ওপরে ভাসে।
                     togglePanel()
                 }
                 dragging = false
@@ -438,18 +502,10 @@ class BubbleService : Service() {
 
     private fun showPanel() {
         val view = flutterView ?: return
-        val panelW = min(screenW - dp(32), dp(340))
-        val panelH = min((screenH * 0.62).toInt(), dp(480))
-        // ডটের পাশে, ডটের কাছাকাছি — ডানদিকে জায়গা থাকলে ডানে, নইলে বামে।
-        val dotCenterX = dotParams.x + dotSizePx / 2
-        var px = if (dotCenterX < screenW / 2) {
-            dotParams.x + dotSizePx + dp(8)
-        } else {
-            dotParams.x - panelW - dp(8)
-        }
-        px = px.coerceIn(dp(8), max(dp(8), screenW - panelW - dp(8)))
-        var py = dotParams.y - dp(24)
-        py = py.coerceIn(dp(32), max(dp(32), screenH - panelH - dp(16)))
+        // Messenger-এর মতো ভাসমান উইন্ডো: প্রায় পুরো স্ক্রিন — উপরে হালকা
+        // ফাঁকা (স্ট্যাটাস বার দেখা যাবে), পাশে ও নিচে অল্প মার্জিন।
+        val panelW = screenW - dp(24)
+        val panelH = screenH - dp(80)
         panelParams = WindowManager.LayoutParams(
             panelW, panelH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -458,8 +514,8 @@ class BubbleService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = px
-            y = py
+            x = dp(12)
+            y = dp(56)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
         try {
@@ -470,13 +526,21 @@ class BubbleService : Service() {
                 windowManager.updateViewLayout(view, panelParams)
             }
             panelVisible = true
-            // প্যানেল খুললেই Dart-কে বলো — তাজা প্রজেক্ট/আইডিয়া পড়ে নেবে।
-            try {
-                panelChannel?.invokeMethod("onPanelShown", null)
-            } catch (_: Exception) {
-            }
+            // ডটটা উইন্ডোর উপরে থাকবে — যেকোনো সময় ট্যাপ করে লুকানো যাবে।
+            bringDotToFront()
         } catch (_: Exception) {
             panelVisible = false
+        }
+    }
+
+    /** ডটকে সবচেয়ে সামনে আনে — উইন্ডো খুললেও ডট ট্যাপ করা যায়। */
+    private fun bringDotToFront() {
+        try {
+            if (dotAdded) {
+                windowManager.removeView(dotView)
+                windowManager.addView(dotView, dotParams)
+            }
+        } catch (_: Exception) {
         }
     }
 
