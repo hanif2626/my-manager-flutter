@@ -14,6 +14,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -23,6 +24,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import io.flutter.FlutterInjector
 import io.flutter.embedding.android.FlutterTextureView
@@ -231,6 +233,27 @@ class BubbleService : Service() {
         val view = FlutterView(applicationContext, FlutterTextureView(applicationContext))
         view.attachToFlutterEngine(eng)
         flutterView = view
+        // DIAGNOSTIC (অস্থায়ী — টাচের সমস্যা ধরা পড়লে তুলে ফেলতে হবে):
+        // নেটিভ টাচ প্রোব — উইন্ডোতে টাচ করলে টোস্ট দেখাবে। টোস্ট উঠলে
+        // বুঝব টাচ FlutterView পর্যন্ত পৌঁছাচ্ছে; না উঠলে উইন্ডোই
+        // টাচ পাচ্ছে না। false ফেরায় — টাচ Flutter-এর কাছেও যায়।
+        view.isClickable = true
+        view.isFocusable = true
+        view.isFocusableInTouchMode = true
+        view.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                Log.d("BubbleService", "FlutterView ACTION_DOWN x=" + event.x + " y=" + event.y)
+                try {
+                    Toast.makeText(
+                        applicationContext,
+                        "ভিউতে টাচ পৌঁছেছে",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                } catch (_: Exception) {
+                }
+            }
+            false
+        }
         panelChannel = MethodChannel(eng.dartExecutor.binaryMessenger, PANEL_CHANNEL)
             .apply {
                 setMethodCallHandler { call, result ->
@@ -245,6 +268,15 @@ class BubbleService : Service() {
                         }
                         "openApp" -> {
                             openApp()
+                            result.success(true)
+                        }
+                        // DIAGNOSTIC (অস্থায়ী): Dart থেকে টোস্ট।
+                        "showToast" -> {
+                            val msg = call.argument<String>("msg") ?: ""
+                            try {
+                                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                            } catch (_: Exception) {
+                            }
                             result.success(true)
                         }
                         else -> result.notImplemented()

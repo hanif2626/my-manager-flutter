@@ -257,7 +257,12 @@ class BubbleWindowApp extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
-        child: const MyManagerApp(),
+        // DIAGNOSTIC (অস্থায়ী): Dart পর্যন্ত টাচ পৌঁছালে টোস্ট দেখাবে।
+        // Listener জেশ্চারে হস্তক্ষেপ করে না — শুধু পয়েন্টার দেখে।
+        child: Listener(
+          onPointerDown: (_) => BubbleWindow.showToast('ডার্ট টাচ পেয়েছে'),
+          child: const MyManagerApp(),
+        ),
       ),
     );
   }

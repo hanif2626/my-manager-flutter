@@ -22,4 +22,12 @@ class BubbleWindow {
       await _channel.invokeMethod('hidePanel');
     } catch (_) {}
   }
+
+  /// ডায়াগনস্টিক (অস্থায়ী): Dart থেকে নেটিভ টোস্ট দেখায় — বাবলের
+  /// ভেতরে ট্যাপ Dart পর্যন্ত পৌঁছাল কি না বোঝার জন্য।
+  static Future<void> showToast(String msg) async {
+    try {
+      await _channel.invokeMethod('showToast', {'msg': msg});
+    } catch (_) {}
+  }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:workmanager/workmanager.dart';
 import '../services/settings_service.dart';
 import '../services/bubble_service.dart';
@@ -21,6 +22,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isDark = SettingsService.isDark;
+  String _appVersion = '...';
   bool _bubbleEnabled = SettingsService.getBool('bubble_enabled', defaultValue: false);
   bool _bubbleBusy = false;
   bool _autoBackupEnabled = SettingsService.getBool('auto_backup_enabled', defaultValue: false);
@@ -35,9 +37,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _loadAppVersion();
     _loadDigestPrefs();
     _loadAutofillPrefs();
     _syncBubbleState();
+  }
+
+  /// APK-এর আসল ভার্সন দেখায় — আগে হাতে লেখা "5.0.0" ছিল, তাই
+  /// সেটিংস আর ফোনের App info-তে আলাদা দেখাত।
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) setState(() => _appVersion = info.version);
+    } catch (_) {}
   }
 
   /// নেটিভ enabled-ই সত্য — ড্র্যাগ-টু-X দিয়ে বন্ধ করলে Dart-এর
@@ -410,7 +422,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionTitle('অ্যাপ তথ্য'),
           _settingTile(
             icon: Icons.rocket_launch_outlined, iconColor: AppTheme.accent,
-            title: 'My Manager', subtitle: 'Version 5.0.0 — Deadline & Multi-select Update',
+            title: 'My Manager', subtitle: 'Version $_appVersion',
           ),
           _settingTile(
             icon: Icons.code, iconColor: AppTheme.textSecondary,
