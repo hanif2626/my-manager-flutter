@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:workmanager/workmanager.dart';
 import '../services/settings_service.dart';
+import '../services/bubble_service.dart';
 import '../services/notification_service.dart';
 import '../services/drive_service.dart';
 import '../widgets/app_theme.dart';
@@ -37,6 +37,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadDigestPrefs();
     _loadAutofillPrefs();
+    _syncBubbleState();
+  }
+
+  /// নেটিভ enabled-ই সত্য — ড্র্যাগ-টু-X দিয়ে বন্ধ করলে Dart-এর
+  /// `bubble_enabled` তখনো true থাকতে পারে; টগলের অবস্থা সেটাই দেখাবে।
+  Future<void> _syncBubbleState() async {
+    try {
+      final nativeEnabled = await BubbleControl.isBubbleEnabled();
+      final dartWanted =
+          SettingsService.getBool('bubble_enabled', defaultValue: false);
+      if (nativeEnabled != dartWanted) {
+        await SettingsService.setBool('bubble_enabled', nativeEnabled);
+      }
+      if (mounted && nativeEnabled != _bubbleEnabled) {
+        setState(() => _bubbleEnabled = nativeEnabled);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadAutofillPrefs() async {
@@ -118,31 +135,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _bubbleBusy = true);
     try {
       if (val) {
-        var granted = await FlutterOverlayWindow.isPermissionGranted();
+        // ওভারলে অনুমতির কোনো রানটাইম ডায়ালগ নেই — সেটিংস পাতায়
+        // গিয়ে ব্যবহারকারী নিজে "অন্য অ্যাপের ওপরে দেখাও" চালু করেন।
+        // তাই অনুমতি না থাকলে পাতা খুলে দিই, আর ফিরে এসে আবার টগল
+        // চাপলে চালু হবে — এখানে অনুমতি এসেছে ধরে নেওয়া হয় না।
+        final granted = await BubbleControl.isOverlayGranted();
         if (!granted) {
-          // This opens Android's "Draw over other apps" settings page for
-          // this app and returns once the user grants or denies it there.
-          granted = await FlutterOverlayWindow.requestPermission() ?? false;
-        }
-        if (!granted) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar( SnackBar(
-            content: Text('পারমিশন ছাড়া বাবল চালু করা যাবে না'),
+          await BubbleControl.openOverlaySettings();
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('সেটিংসে "অন্য অ্যাপের ওপরে দেখাও" চালু করে ফিরে এসে আবার বাবল চালু করো'),
             backgroundColor: AppTheme.red,
           ));
           setState(() => _bubbleBusy = false);
           return;
         }
-        await FlutterOverlayWindow.showOverlay(
-          height: 60, width: 60,
-          alignment: OverlayAlignment.centerRight,
-          flag: OverlayFlag.defaultFlag,
-          enableDrag: true,
-          positionGravity: PositionGravity.auto,
-          overlayTitle: 'My Manager',
-          overlayContent: 'কুইক-অ্যাড বাবল চলছে',
-        );
+        final started = await BubbleControl.startBubble();
+        if (!started) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('বাবল চালু করা যায়নি — অনুমতি আছে কিনা দেখো'),
+            backgroundColor: AppTheme.red,
+          ));
+          setState(() => _bubbleBusy = false);
+          return;
+        }
       } else {
-        await FlutterOverlayWindow.closeOverlay();
+        await BubbleControl.stopBubble();
       }
       await SettingsService.setBool('bubble_enabled', val);
       if (mounted) setState(() { _bubbleEnabled = val; _bubbleBusy = false; });
@@ -226,7 +243,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             iconColor: AppTheme.accent,
             title: 'ফ্লোটিং বাবল',
             subtitle: 'হোম স্ক্রিন ও অন্য অ্যাপের উপরেও ভাসবে (Messenger-এর মতো) — '
-                'সিস্টেম পারমিশন লাগবে',
+                'বাবলে ট্যাপ করলে প্যানেল খুলবে, আবার ট্যাপ করলে লুকাবে; '
+                'নিচের ✕-এ টেনে নিলে বাবল বন্ধ হবে। সিস্টেম পারমিশন লাগবে',
             trailing: _bubbleBusy
                 ? const SizedBox(width: 20, height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent))

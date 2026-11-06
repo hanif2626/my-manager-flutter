@@ -2,12 +2,12 @@ import 'docs/screens/vault_picker_app.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:timezone/data/latest.dart' as tz;
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:workmanager/workmanager.dart';
 import 'services/widget_service.dart';
 import 'screens/home_shell.dart';
 import 'widgets/app_theme.dart';
-import 'widgets/overlay_bubble.dart';
+import 'widgets/bubble_panel.dart';
+import 'services/bubble_service.dart';
 import 'screens/autofill_picker_screen.dart';
 import 'services/vault_service.dart';
 import 'services/notification_service.dart';
@@ -79,26 +79,19 @@ void main() async {
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
   ));
-  // If the floating bubble was left on last time and the overlay permission
-  // is still granted, bring it back so it survives an app restart. If the
-  // permission was revoked meanwhile, this just does nothing. Wrapped in
-  // try-catch so a plugin hiccup here can never block the app from
-  // launching — worst case, the bubble just doesn't reappear this time.
+  // বাবল চালু থাকলে অ্যাপ খুললেই ফিরিয়ে আনা — নেটিভে লেখা enabled-ই
+  // সত্য (ড্র্যাগ-টু-X দিয়ে বন্ধ করলে Dart-এর মান তখনো true থাকতে
+  // পারে)। অনুমতি না থাকলে কিছুই হয় না। try-catch যাতে বাবলের
+  // সমস্যা অ্যাপ চালু হতে কখনো বাধা দিতে না পারে।
   try {
-    final bubbleWanted = SettingsService.getBool('bubble_enabled', defaultValue: false);
-    if (bubbleWanted) {
-      final granted = await FlutterOverlayWindow.isPermissionGranted();
-      if (granted) {
-        await FlutterOverlayWindow.showOverlay(
-          height: 60, width: 60,
-          alignment: OverlayAlignment.centerRight,
-          flag: OverlayFlag.defaultFlag,
-          enableDrag: true,
-          positionGravity: PositionGravity.auto,
-          overlayTitle: 'My Manager',
-          overlayContent: 'কুইক-অ্যাড বাবল চলছে',
-        );
-      }
+    final dartWanted =
+        SettingsService.getBool('bubble_enabled', defaultValue: false);
+    final nativeEnabled = await BubbleControl.isBubbleEnabled();
+    if (nativeEnabled != dartWanted) {
+      await SettingsService.setBool('bubble_enabled', nativeEnabled);
+    }
+    if (nativeEnabled && await BubbleControl.isOverlayGranted()) {
+      await BubbleControl.startBubble();
     }
   } catch (_) {
     // Never let a bubble-restore failure prevent the app from starting.
@@ -219,24 +212,24 @@ void callbackDispatcher() {
   });
 }
 
-/// Entry point for the system-wide overlay window (the floating chat-head).
-/// This runs in its own separate Flutter engine, started by the native
-/// Android side — completely independent of the app's normal UI tree.
+/// Entry point for the floating bubble panel (Messenger-এর চ্যাট
+/// উইন্ডোর মতো)। BubbleService-এর নিজের Flutter engine-এ চলে — মূল
+/// অ্যাপের UI tree থেকে সম্পূর্ণ আলাদা। ডটটা নেটিভ Kotlin-এ, তাই
+/// এখানে শুধু প্যানেলের UI।
 @pragma('vm:entry-point')
-void overlayMain() async {
+void bubbleMain() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Needed so the bubble's own "turn off" button can persist that choice
-  // (SettingsService isn't shared automatically between the app's engine
-  // and this separate overlay engine — each needs its own init call).
+  // SettingsService isn't shared automatically between the app's engine
+  // and this separate bubble engine — each needs its own init call.
   try {
     await SettingsService.init();
   } catch (_) {}
-  runApp(const OverlayBubble());
+  runApp(const BubblePanelApp());
 }
 
 /// Entry point Android launches when it wants us to show autofill
 /// suggestions for a login field somewhere else on the device. Runs in
-/// its own separate Flutter engine, same pattern as overlayMain() above.
+/// its own separate Flutter engine, same pattern as bubbleMain() above.
 @pragma('vm:entry-point')
 void autofillEntryPoint() async {
   WidgetsFlutterBinding.ensureInitialized();

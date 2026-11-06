@@ -12,6 +12,25 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ScreenTimeBridge.register(flutterEngine, applicationContext)
+        // ভাসমান বাবল (BubbleControl): চালু/বন্ধ, ওভারলে অনুমতি।
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BubbleControl.CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isOverlayGranted" -> result.success(BubbleControl.isOverlayGranted(applicationContext))
+                    "isBubbleEnabled" -> result.success(BubbleControl.isBubbleEnabled(applicationContext))
+                    "isBubbleRunning" -> result.success(BubbleControl.isBubbleRunning())
+                    "openOverlaySettings" -> {
+                        BubbleControl.openOverlaySettings(this)
+                        result.success(true)
+                    }
+                    "startBubble" -> result.success(BubbleControl.startBubble(applicationContext))
+                    "stopBubble" -> {
+                        BubbleControl.stopBubble(applicationContext)
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         // চাকরির অ্যাপের নোটিফিকেশন ট্র্যাক (শুধু বেছে দেওয়া অ্যাপ)।
         JobNotifBridge.register(flutterEngine, applicationContext)
         // চাকরি হাব থেকে SmartStudyBD খোলা / সার্কুলারের লিংক খোলা।

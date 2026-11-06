@@ -161,14 +161,16 @@
             android:theme="@style/AutofillTheme"
             android:windowSoftInputMode="adjustResize"/>
 
-        <!-- Floating bubble overlay service (flutter_overlay_window) -->
+        <!-- Floating bubble (Messenger-style chat head): own foreground
+             service — no third-party overlay plugin anymore. The dot,
+             panel and drag-to-dismiss are all owned by BubbleService. -->
         <service
-            android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"
+            android:name=".BubbleService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="my_manager_quick_add_bubble"/>
+                android:value="my_manager_bubble"/>
         </service>
 
         <!-- Reminder notifications' Done / Not yet buttons: this receiver

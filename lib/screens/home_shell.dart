@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../jobs/radar/radar_runner.dart';
 import 'package:flutter/services.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import '../widgets/app_theme.dart';
 import '../services/widget_service.dart';
 import '../services/auth_service.dart';
@@ -42,14 +41,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _dashboardGen = 0;
 
   StreamSubscription? _shareSub;
-  StreamSubscription? _overlaySub;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initShareListener();
-    _initOverlayListener();
     // বাবল (আলাদা engine) থেকে হওয়া পরিবর্তন ধরার ওয়াচার — অ্যাপ সামনে থাকলে চলে।
     DataSync.ideasChanged.addListener(_onExternalChange);
     DataSync.start();
@@ -68,28 +65,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     await Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const ReminderScreen()));
     _reminderOpen = false;
-  }
-
-  /// Listens for signals sent from the floating bubble (see
-  /// overlay_bubble.dart's shareData() calls). This is the actual fix
-  /// for edits/adds made via the bubble not showing up in the main app —
-  /// an overlay window can float *over* the app without ever properly
-  /// backgrounding it, so the resume-based refresh below sometimes never
-  /// fires at all. This listener refreshes immediately instead of
-  /// waiting for a pause/resume cycle that may not happen.
-  void _initOverlayListener() {
-    try {
-      _overlaySub = FlutterOverlayWindow.overlayListener.listen((event) {
-        // বার্তা যা-ই হোক, ডাটাবেস যাচাই করে নিই (বার্তা হারালেও ছাপ মিলিয়ে ধরা পড়বে)।
-        DataSync.check();
-        if (event == 'idea_added' || event == 'idea_updated') {
-          if (mounted) setState(() => _dashboardGen++);
-        }
-      });
-    } catch (_) {
-      // If the plugin's listener isn't available for some reason, the
-      // resume-based refresh below still covers most real-world cases.
-    }
   }
 
   /// "Share TO My Manager" — content shared in from other apps (browser,
@@ -130,7 +105,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     ReminderService.openRequest.removeListener(_openReminders);
     _shareSub?.cancel();
-    _overlaySub?.cancel();
     super.dispose();
   }
 
