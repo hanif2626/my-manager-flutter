@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart';
-import 'package:file_picker/file_picker.dart';
+import 'bubble_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/vault_entry.dart';
@@ -333,7 +333,7 @@ class VaultBackupService {
 
   /// ফাইল বাছাই; বাতিল করলে null।
   static Future<String?> pickBackupFile() async {
-    final result = await FilePicker.platform.pickFiles(withData: true);
+    final result = await BubblePicker.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return null;
     final f = result.files.first;
     List<int>? bytes = f.bytes;

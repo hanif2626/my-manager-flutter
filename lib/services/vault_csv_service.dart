@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
+import 'bubble_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -164,7 +164,7 @@ class VaultCsvService {
   /// progress indicator only for that part — not while the system file
   /// picker itself is open. Returns null if they cancelled.
   static Future<VaultCsvImportResult?> pickAndImport({VoidCallback? onFilePicked}) async {
-    final result = await FilePicker.platform.pickFiles(withData: true);
+    final result = await BubblePicker.pickFiles(withData: true);
     final picked = result?.files.single;
     if (picked?.bytes == null) return null;
     onFilePicked?.call();
