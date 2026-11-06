@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../db/db_helper.dart';
+import 'bubble_window.dart';
 import 'settings_service.dart';
 import 'safety_net.dart';
 
@@ -54,6 +55,13 @@ class DriveService {
 
   // ── SIGN IN ────────────────────────────────────────────
   Future<bool> signIn() async {
+    // বাবলের ভাসমান উইন্ডোতে Google Sign-In চলে না (Activity লাগে) —
+    // মূল অ্যাপ খুলে সেখানে সাইন-ইন করতে হবে।
+    if (BubbleWindow.isBubble) {
+      await BubbleWindow.openMainApp();
+      lastError = 'মূল অ্যাপে সাইন-ইন করো';
+      return false;
+    }
     try {
       lastError = null;
       _account = await _googleSignIn.signIn();

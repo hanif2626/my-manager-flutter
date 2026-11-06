@@ -6,7 +6,7 @@ import 'package:workmanager/workmanager.dart';
 import 'services/widget_service.dart';
 import 'screens/home_shell.dart';
 import 'widgets/app_theme.dart';
-import 'widgets/bubble_panel.dart';
+import 'services/bubble_window.dart';
 import 'services/bubble_service.dart';
 import 'screens/autofill_picker_screen.dart';
 import 'services/vault_service.dart';
@@ -26,13 +26,13 @@ const cashbookReminderTaskName = 'cashbook_reminder_check';
 const reminderRearmTaskName = 'reminder_rearm';
 const radarDailyTaskName = 'job_radar_daily';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Flutter's default release-mode error widget is a blank grey box with
-  // no text (by design, to avoid leaking stack traces to end users) —
-  // which is indistinguishable from a genuinely blank screen. Showing the
-  // real message here instead makes any future crash immediately
-  // diagnosable from a screenshot, on a real device, without adb.
+/// Flutter's default release-mode error widget is a blank grey box with
+/// no text (by design, to avoid leaking stack traces to end users) —
+/// which is indistinguishable from a genuinely blank screen. Showing the
+/// real message here instead makes any future crash immediately
+/// diagnosable from a screenshot, on a real device, without adb.
+/// main() আর bubbleMain() — দুজনেই এটা ব্যবহার করে।
+void _installErrorWidget() {
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return Material(
       color: Colors.white,
@@ -47,6 +47,11 @@ void main() async {
       ),
     );
   };
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  _installErrorWidget();
   try {
     tz.initializeTimeZones();
   } catch (_) {}
@@ -212,19 +217,70 @@ void callbackDispatcher() {
   });
 }
 
-/// Entry point for the floating bubble panel (Messenger-এর চ্যাট
-/// উইন্ডোর মতো)। BubbleService-এর নিজের Flutter engine-এ চলে — মূল
-/// অ্যাপের UI tree থেকে সম্পূর্ণ আলাদা। ডটটা নেটিভ Kotlin-এ, তাই
-/// এখানে শুধু প্যানেলের UI।
+/// Entry point for the floating bubble window (Messenger-এর চ্যাট
+/// উইন্ডোর মতো)। BubbleService-এর নিজের Flutter engine-এ চলে — তবে
+/// এখন ভেতরে ছোট প্যানেল নয়, পুরো অ্যাপটাই চলে (MyManagerApp)।
+/// main()-এর ব্যাকগ্রাউন্ড কাজ (WorkManager, নোটিফিকেশন ডাইজেস্ট,
+/// ড্রাইভ ব্যাকআপ, রিমাইন্ডার rearm) এখানে চালানো হয় না — সেগুলো
+/// মূল অ্যাপের কাজ, বাবলে চালালে দুবার চলবে। শুধু UI-এর জন্য
+/// দরকারি init-টুকুই এখানে হয়।
 @pragma('vm:entry-point')
 void bubbleMain() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _installErrorWidget();
+  try {
+    tz.initializeTimeZones();
+  } catch (_) {}
   // SettingsService isn't shared automatically between the app's engine
   // and this separate bubble engine — each needs its own init call.
   try {
     await SettingsService.init();
   } catch (_) {}
-  runApp(const BubblePanelApp());
+  // বাবলের ভাসমান উইন্ডোর ভেতরে চলছে — Activity-নির্ভর কাজ
+  // (বায়োমেট্রিক, ছবি/ফাইল বাছা, Google Sign-In) এখানে সরাসরি
+  // চলে না; সেগুলো মূল অ্যাপে খুলে করতে হয়।
+  BubbleWindow.isBubble = true;
+  runApp(const BubbleWindowApp());
+}
+
+/// বাবলের ভাসমান উইন্ডোতে পুরো অ্যাপ — Messenger-এর চ্যাট উইন্ডোর মতো।
+/// মূল অ্যাপটাই (MyManagerApp), শুধু গোল কোণা আর হালকা বর্ডার।
+class BubbleWindowApp extends StatelessWidget {
+  const BubbleWindowApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.white.withOpacity(0.15)),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: const MyManagerApp(),
+      ),
+    );
+  }
+}
+
+/// বাবলের উইন্ডোতে ব্যাক বাটন: ভেতরের পাতা থাকলে সেটা বন্ধ হয়,
+/// একদম গোড়ায় থাকলে উইন্ডোটা লুকিয়ে যায় (অ্যাপ বন্ধ হয় না)।
+/// মূল অ্যাপে এটা কিছু করে না।
+class _BubbleBackHandler extends StatelessWidget {
+  const _BubbleBackHandler({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!BubbleWindow.isBubble) return child;
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) BubbleWindow.hidePanel();
+      },
+      child: child,
+    );
+  }
 }
 
 /// Entry point Android launches when it wants us to show autofill
@@ -294,7 +350,7 @@ class _MyManagerAppState extends State<MyManagerApp> {
       // Makes any text in the app long-press/drag-selectable and copyable,
       // without having to switch every Text widget to SelectableText.
       builder: (context, child) => SelectionArea(child: child!),
-      home: HomeShell(onThemeToggle: toggleTheme),
+      home: _BubbleBackHandler(child: HomeShell(onThemeToggle: toggleTheme)),
     );
   }
 }

@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
+import '../../services/bubble_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' as sqflite;
 import '../db/cashbook_db.dart';
@@ -23,7 +23,7 @@ class CashbookLegacyImportService {
   /// anything. Returns null if they cancelled or the file doesn't look
   /// like this kind of backup.
   static Future<LegacyImportPreview?> pickAndPreview() async {
-    final result = await FilePicker.platform.pickFiles(withData: true);
+    final result = await BubblePicker.pickFiles(withData: true);
     final picked = result?.files.single;
     if (picked?.bytes == null) return null;
 

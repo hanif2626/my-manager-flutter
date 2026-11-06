@@ -47,6 +47,15 @@ object BubbleControl {
         activity.startActivity(intent)
     }
 
+    /** বাবলের নিজের ইঞ্জিন (Service) থেকে সেটিংস পাতা খোলে — Activity নেই বলে NEW_TASK লাগে। */
+    fun openOverlaySettingsFromService(ctx: Context) {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${ctx.packageName}"),
+        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        ctx.startActivity(intent)
+    }
+
     /** ফোরগ্রাউন্ড থেকে ডাকা হয় (Settings টগল / অ্যাপ চালু) — ব্যাকগ্রাউন্ড থেকে নয়। */
     fun startBubble(ctx: Context): Boolean {
         if (!isOverlayGranted(ctx)) return false

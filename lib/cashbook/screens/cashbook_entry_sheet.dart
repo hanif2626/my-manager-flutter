@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../services/bubble_picker.dart';
 import '../db/cashbook_db.dart';
 import '../models/cashbook_entry.dart';
 import '../models/cashbook_category.dart';
@@ -160,8 +161,7 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
   }
 
   Future<void> _attachVoucher() async {
-    final picker = ImagePicker();
-    final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70, maxWidth: 1280);
+    final img = await BubblePicker.pickImage(source: ImageSource.gallery, imageQuality: 70, maxWidth: 1280);
     if (img == null) return;
     final bytes = await File(img.path).readAsBytes();
     setState(() => _voucherBase64 = base64Encode(bytes));

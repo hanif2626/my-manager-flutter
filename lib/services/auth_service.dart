@@ -1,5 +1,7 @@
 import 'package:local_auth/local_auth.dart';
 
+import 'bubble_window.dart';
+
 /// Thin wrapper around local_auth for locking individual projects behind
 /// the device's own fingerprint/face unlock or PIN/pattern/password —
 /// deliberately not a custom in-app PIN system, since the OS already has
@@ -25,6 +27,12 @@ class AuthService {
   /// false on cancel, failure, or any plugin error — callers should
   /// treat that as "stay locked out".
   static Future<bool> authenticate({String reason = 'প্রজেক্টটা লক করা — যাচাই করো'}) async {
+    // বাবলের ভাসমান উইন্ডোতে বায়োমেট্রিক চলে না (Activity লাগে) —
+    // মূল অ্যাপ খুলে সেখানে যাচাই হবে।
+    if (BubbleWindow.isBubble) {
+      await BubbleWindow.openMainApp();
+      return false;
+    }
     try {
       return await _auth.authenticate(
         localizedReason: reason,

@@ -5,7 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:cryptography/cryptography.dart';
-import 'package:file_picker/file_picker.dart';
+import '../../services/bubble_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../services/drive_service.dart';
@@ -187,7 +187,7 @@ class DocsBackupService {
   // ───────────────── রিস্টোর ─────────────────
 
   static Future<Uint8List?> pickBackupFile() async {
-    final r = await FilePicker.platform.pickFiles(withData: true);
+    final r = await BubblePicker.pickFiles(withData: true);
     if (r == null || r.files.isEmpty) return null;
     final f = r.files.first;
     if (f.bytes != null) return f.bytes!;

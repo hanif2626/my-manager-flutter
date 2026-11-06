@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../services/bubble_picker.dart';
 import '../services/docs_service.dart';
 import 'docs_home_screen.dart';
 
@@ -27,7 +28,7 @@ class DocsPicker {
 
   /// null → বাতিল। বড় ফাইলে FormatException।
   static Future<NewDocPage?> image(ImageSource source) => _guard(() async {
-        final img = await ImagePicker().pickImage(source: source, imageQuality: 85, maxWidth: 2200);
+        final img = await BubblePicker.pickImage(source: source, imageQuality: 85, maxWidth: 2200);
         if (img == null) return null;
         final bytes = await img.readAsBytes();
         if (bytes.length > maxBytes) throw const FormatException('ফাইল ১৫ MB-এর বেশি');
@@ -36,7 +37,7 @@ class DocsPicker {
 
   /// গ্যালারি থেকে একসাথে অনেক ছবি (পাতার সংখ্যা ঠিক না থাকা ডকুমেন্টের জন্য)।
   static Future<List<NewDocPage>> manyImages() => _guard(() async {
-        final list = await ImagePicker().pickMultiImage(imageQuality: 85, maxWidth: 2200);
+        final list = await BubblePicker.pickMultiImage(imageQuality: 85, maxWidth: 2200);
         final out = <NewDocPage>[];
         for (final img in list) {
           final bytes = await img.readAsBytes();
@@ -47,7 +48,7 @@ class DocsPicker {
       });
 
   static Future<NewDocPage?> file() => _guard(() async {
-        final r = await FilePicker.platform.pickFiles(
+        final r = await BubblePicker.pickFiles(
           type: FileType.custom,
           allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
           withData: true,
