@@ -90,6 +90,11 @@ class BubbleService : Service() {
     private var panelAdded = false
     private var panelVisible = false
 
+    // ডটের "বাড়ি" — উইন্ডো খুললে ডট উপরে বসে, লুকালে এখানে ফেরে।
+    private var dotHomeX = -1
+    private var dotHomeY = -1
+    private var dotParked = false
+
     private var dotSizePx = 0
     private var screenW = 0
     private var screenH = 0
@@ -433,6 +438,12 @@ class BubbleService : Service() {
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
+                    // উইন্ডো খোলা থাকতে ডট টেনে সরালে "বাড়ি"ও সরে যাবে —
+                    // লুকালে ডট নতুন জায়গায় ফিরবে।
+                    if (dotParked) {
+                        dotHomeX = dotParams.x
+                        dotHomeY = dotParams.y
+                    }
                     saveDotPosition()
                 }
             })
@@ -502,10 +513,10 @@ class BubbleService : Service() {
 
     private fun showPanel() {
         val view = flutterView ?: return
-        // Messenger-এর মতো ভাসমান উইন্ডো: প্রায় পুরো স্ক্রিন — উপরে হালকা
-        // ফাঁকা (স্ট্যাটাস বার দেখা যাবে), পাশে ও নিচে অল্প মার্জিন।
-        val panelW = screenW - dp(24)
-        val panelH = screenH - dp(80)
+        // Messenger-এর মতো ভাসমান উইন্ডো: চারপাশে স্পষ্ট ফাঁকা — উপরে
+        // ১১০dp, পাশে ৩২dp, নিচে ১১০dp। প্রায় পুরো স্ক্রিন নয়।
+        val panelW = screenW - dp(64)
+        val panelH = screenH - dp(220)
         panelParams = WindowManager.LayoutParams(
             panelW, panelH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -514,8 +525,8 @@ class BubbleService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = dp(12)
-            y = dp(56)
+            x = dp(32)
+            y = dp(110)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
         try {
@@ -526,10 +537,42 @@ class BubbleService : Service() {
                 windowManager.updateViewLayout(view, panelParams)
             }
             panelVisible = true
-            // ডটটা উইন্ডোর উপরে থাকবে — যেকোনো সময় ট্যাপ করে লুকানো যাবে।
-            bringDotToFront()
+            // ডটটা উইন্ডোর উপরে বসবে (ডানদিকের কোণার ঠিক উপরে) — গায়ে
+            // লেগে থাকবে না, যেকোনো সময় ট্যাপ করে লুকানো যাবে।
+            parkDotAboveWindow()
         } catch (_: Exception) {
             panelVisible = false
+        }
+    }
+
+    /** ডটকে উইন্ডোর উপরে বসায় (ডানদিকের কোণার ঠিক উপরে)। */
+    private fun parkDotAboveWindow() {
+        try {
+            if (!dotParked) {
+                dotHomeX = dotParams.x
+                dotHomeY = dotParams.y
+                dotParked = true
+            }
+            val params = panelParams ?: return
+            dotParams.x = params.x + params.width - dotSizePx
+            dotParams.y = params.y - dotSizePx - dp(8)
+            bringDotToFront()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** ডটকে আগের জায়গায় ফিরিয়ে দেয় (উইন্ডো লুকালে)। */
+    private fun unparkDot() {
+        try {
+            if (!dotParked) return
+            dotParked = false
+            if (dotHomeX >= 0 && dotHomeY >= 0) {
+                dotParams.x = dotHomeX
+                dotParams.y = dotHomeY
+                updateDotLayout()
+                saveDotPosition()
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -545,6 +588,7 @@ class BubbleService : Service() {
     }
 
     private fun hidePanel() {
+        unparkDot()
         if (!panelAdded) {
             panelVisible = false
             return

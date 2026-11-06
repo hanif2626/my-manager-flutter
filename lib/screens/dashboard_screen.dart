@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/bubble_picker.dart';
+import '../services/bubble_window.dart';
 import '../db/db_helper.dart';
 import '../models/project.dart';
 import '../widgets/app_theme.dart';
@@ -33,6 +34,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() { super.initState(); _load(); _checkCloud(); }
 
   Future<void> _checkCloud() async {
+    // বাবলের ভেতরে Drive সাইন-ইন চেক করা হয় না (আলাদা engine,
+    // নেটওয়ার্ক কল) — মেঘের আইকন অফলাইনই থাকবে; আসল অবস্থা মূল
+    // অ্যাপে দেখা যাবে।
+    if (BubbleWindow.isBubble) return;
     // reflects real Drive connection: filled green cloud = সিংক্‌ড, empty = অফলাইন
     bool ok = DriveService.instance.isSignedIn;
     if (!ok) ok = await DriveService.instance.signInSilently();

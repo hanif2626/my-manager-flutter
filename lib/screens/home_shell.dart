@@ -19,6 +19,7 @@ import '../reminder/screens/reminder_screen.dart';
 import '../reminder/services/reminder_service.dart';
 import '../services/notification_service.dart';
 import '../services/data_sync.dart';
+import '../services/bubble_window.dart';
 import '../cashbook/services/spending_guard.dart';
 
 /// Top-level shell: bottom navigation between Projects / Search / Vault /
@@ -182,6 +183,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   ///  ১. প্রজেক্ট/খোঁজো/সেটিংস ট্যাবে থাকলে → হোম ট্যাবে ফেরে, অ্যাপ বন্ধ হয় না।
   ///  ২. হোমে থাকলে → "অ্যাপ বন্ধ করবে?" জিজ্ঞেস করে; হ্যাঁ হলেই কেবল বন্ধ।
   Future<void> _onBack() async {
+    // বাবলের ভাসমান উইন্ডোতে ব্যাক মানে উইন্ডো লুকানো — "অ্যাপ বন্ধ
+    // করবে?" ডায়ালগ নয়, হোম ট্যাবে ফেরাও নয়।
+    if (BubbleWindow.isBubble) {
+      BubbleWindow.hidePanel();
+      return;
+    }
     if (_index != 0) {
       setState(() => _index = 0);
       return;
@@ -232,9 +239,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       },
       child: Scaffold(
       backgroundColor: AppTheme.bg,
-      // IndexedStack keeps each tab's state (scroll position, search
-      // query, etc.) alive when switching, instead of rebuilding it.
-      body: IndexedStack(index: _index, children: tabs),
+      // বাবলের ভেতরে IndexedStack-এর ৪টা ট্যাব একসাথে বানানো ভারী —
+      // চালু হতেই সব ট্যাবের DB পড়া + বিল্ড হয়, ফোন স্লো হয়ে যায়।
+      // তাই বাবলে শুধু যে ট্যাবটা দেখা যাচ্ছে সেটাই বানানো হয়।
+      body: BubbleWindow.isBubble
+          ? tabs[_index]
+          : IndexedStack(index: _index, children: tabs),
       bottomNavigationBar: NavigationBarTheme(
         data: NavigationBarThemeData(
           backgroundColor: AppTheme.bg2,
