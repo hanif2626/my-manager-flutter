@@ -25,6 +25,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import io.flutter.FlutterInjector
+import io.flutter.embedding.android.FlutterTextureView
 import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor.DartEntrypoint
@@ -221,7 +222,13 @@ class BubbleService : Service() {
         )
         eng.dartExecutor.executeDartEntrypoint(entrypoint)
         engine = eng
-        val view = FlutterView(applicationContext)
+        // TextureView দিয়ে রেন্ডার — ডিফল্ট SurfaceView ভাসমান উইন্ডোতে
+        // ছবি ঠিক আঁকে কিন্তু টাচ ইঞ্জিন পর্যন্ত পৌঁছায় না (z-index /
+        // input সমস্যা, v1553-এ ফোনে ধরা পড়েছে)। TextureView সাধারণ
+        // ভিউ-হায়ারার্কিতেই থাকে, তাই টাচ স্বাভাবিকভাবে কাজ করে।
+        // পারফরম্যান্স একটু কম হতে পারে, কিন্তু কাজ না করা বাবলের
+        // চেয়ে একটু ধীরে চলা বাবল ভালো।
+        val view = FlutterView(applicationContext, FlutterTextureView(applicationContext))
         view.attachToFlutterEngine(eng)
         flutterView = view
         panelChannel = MethodChannel(eng.dartExecutor.binaryMessenger, PANEL_CHANNEL)
@@ -535,6 +542,12 @@ class BubbleService : Service() {
                 panelAdded = true
             } else {
                 windowManager.updateViewLayout(view, panelParams)
+            }
+            // উইন্ডো দেখানোর পর ফোকাস নেওয়া — কিবোর্ড/টাচ যাতে
+            // ভেতরের FlutterView-এ পৌঁছায়।
+            try {
+                view.requestFocus()
+            } catch (_: Exception) {
             }
             panelVisible = true
             // ডটটা উইন্ডোর উপরে বসবে (ডানদিকের কোণার ঠিক উপরে) — গায়ে
