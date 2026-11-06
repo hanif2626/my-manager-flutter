@@ -4,6 +4,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import '../services/bubble_picker.dart';
 import 'package:archive/archive_io.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'dart:io';
@@ -30,7 +31,6 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
   List<IdeaFile> _files = [];
   late Idea _idea;
   bool _loading = true;
-  final _picker = ImagePicker();
   final _audioPlayer = AudioPlayer();
   String? _playingFileId; // tracks which file is currently playing
 
@@ -127,7 +127,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
   // ── ADD IMAGE ─────────────────────────────────────────
   Future<void> _addImage(ImageSource source) async {
     try {
-      final picked = await _picker.pickImage(source: source, imageQuality: 85);
+      final picked = await BubblePicker.pickImage(source: source, imageQuality: 85);
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
       final b64 = base64Encode(bytes);
@@ -149,7 +149,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
   // ── ADD ANY FILE ──────────────────────────────────────
   Future<void> _addAnyFile() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await BubblePicker.pickFiles(
         type: FileType.any, allowMultiple: true,
         withData: true,
       );

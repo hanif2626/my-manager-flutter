@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import '../services/bubble_picker.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
@@ -49,7 +50,6 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   bool _loading = true;
   bool _exporting = false;
   int _archivedCount = 0;
-  final _picker = ImagePicker();
   final _recorder = AudioRecorder();
 
   // Multi-select state
@@ -372,7 +372,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
           }
 
           Future<void> pickImage(ImageSource source) async {
-            final picked = await _picker.pickImage(source: source, imageQuality: 85);
+            final picked = await BubblePicker.pickImage(source: source, imageQuality: 85);
             if (picked == null) return;
             final bytes = await picked.readAsBytes();
             final b64 = base64Encode(bytes);
@@ -383,7 +383,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
           }
 
           Future<void> pickFile() async {
-            final result = await FilePicker.platform.pickFiles(
+            final result = await BubblePicker.pickFiles(
                 type: FileType.any, allowMultiple: true, withData: true);
             if (result == null) return;
             for (final pf in result.files) {
