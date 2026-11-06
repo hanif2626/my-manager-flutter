@@ -26,7 +26,7 @@ import androidx.core.app.NotificationCompat
 import io.flutter.FlutterInjector
 import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.dart.DartEntrypoint
+import io.flutter.embedding.engine.dart.DartExecutor.DartEntrypoint
 import io.flutter.plugin.common.MethodChannel
 import kotlin.math.hypot
 import kotlin.math.max
