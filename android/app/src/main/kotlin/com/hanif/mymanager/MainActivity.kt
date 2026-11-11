@@ -9,6 +9,25 @@ import io.flutter.plugin.common.MethodChannel
 // FlutterFragmentActivity (not FlutterActivity) is required by the
 // local_auth plugin for its biometric/PIN prompt to work.
 class MainActivity : FlutterFragmentActivity() {
+
+    companion object {
+        const val EXTRA_BUBBLE_TARGET = "bubble_target"
+    }
+
+    // বাবল থেকে আসা গন্তব্য — Dart একবার পড়ে নিলেই শেষ।
+    private var pendingBubbleTarget: String? = null
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingBubbleTarget = intent?.getStringExtra(EXTRA_BUBBLE_TARGET)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingBubbleTarget = intent.getStringExtra(EXTRA_BUBBLE_TARGET)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ScreenTimeBridge.register(flutterEngine, applicationContext)
@@ -24,6 +43,11 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(true)
                     }
                     "startBubble" -> result.success(BubbleControl.startBubble(applicationContext))
+                    "takeBubbleTarget" -> {
+                        val t = pendingBubbleTarget
+                        pendingBubbleTarget = null
+                        result.success(t)
+                    }
                     "stopBubble" -> {
                         BubbleControl.stopBubble(applicationContext)
                         result.success(true)

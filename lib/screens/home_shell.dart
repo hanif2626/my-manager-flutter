@@ -9,6 +9,9 @@ import '../services/auth_service.dart';
 import '../cashbook/services/cashbook_service.dart';
 import '../cashbook/services/cashbook_notification_service.dart';
 import 'dashboard_screen.dart';
+import 'backup_screen.dart';
+import '../services/bubble_service.dart' as bubble_ctl;
+import '../services/bubble_window.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'share_intake_screen.dart';
@@ -52,9 +55,24 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     DataSync.ideasChanged.addListener(_onExternalChange);
     DataSync.start();
     ReminderService.openRequest.addListener(_openReminders);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkBubbleTarget());
     ReminderService.launchedFromReminder().then((launched) {
       if (launched && mounted) _openReminders();
     });
+  }
+
+  /// বাবল থেকে কোনো কাজের জন্য (যেমন Drive সাইন-ইন) মূল অ্যাপে
+  /// পাঠানো হলে, অ্যাপ পুরনো অবস্থার পেজে (যেমন খোলা প্রজেক্টে) না
+  /// গিয়ে সোজা সেই কাজের পেজে খোলে।
+  Future<void> _checkBubbleTarget() async {
+    if (BubbleWindow.isBubble || !mounted) return;
+    final t = await bubble_ctl.BubbleControl.takeBubbleTarget();
+    if (t == null || !mounted) return;
+    if (t == 'backup') {
+      final nav = Navigator.of(context);
+      nav.popUntil((r) => r.isFirst);
+      nav.push(MaterialPageRoute(builder: (_) => const BackupScreen()));
+    }
   }
 
   bool _reminderOpen = false;
@@ -125,6 +143,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ReminderService.rearmAll().catchError((_) {});
       NotificationService.scheduleDailyDigest().catchError((_) {});
       ReminderService.changes.value++;
+      _checkBubbleTarget();
     }
     // Refresh the home screen widget whenever the app leaves the
     // foreground — covers ideas added/edited/completed during the

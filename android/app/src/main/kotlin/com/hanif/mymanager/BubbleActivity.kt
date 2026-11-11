@@ -183,7 +183,7 @@ class BubbleActivity : FlutterFragmentActivity() {
                         result.success(true)
                     }
                     "openApp" -> {
-                        openMainApp()
+                        openMainApp(call.argument<String>("target"))
                         result.success(true)
                     }
                     else -> result.notImplemented()
@@ -191,11 +191,14 @@ class BubbleActivity : FlutterFragmentActivity() {
             }
     }
 
-    private fun openMainApp() {
+    private fun openMainApp(target: String?) {
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
             action = Intent.ACTION_MAIN
             addCategory(Intent.CATEGORY_LAUNCHER)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            // গন্তব্য থাকলে MainActivity সেটা Dart-কে দেবে — অ্যাপ
+            // পুরনো পেজে না খুলে সোজা সেই পেজে যাবে।
+            if (target != null) putExtra(MainActivity.EXTRA_BUBBLE_TARGET, target)
         }
         try {
             startActivity(intent)

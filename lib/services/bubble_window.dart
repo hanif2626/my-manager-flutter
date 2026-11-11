@@ -10,9 +10,11 @@ class BubbleWindow {
   static const _channel = MethodChannel('com.hanif.mymanager/bubble-panel');
 
   /// মূল অ্যাপ (MainActivity) খোলে — বাবলের উইন্ডো লুকিয়ে যায়।
-  static Future<void> openMainApp() async {
+  /// [target] দিলে মূল অ্যাপ সেই পেজেই খুলবে (যেমন 'backup' —
+  /// সাইন-ইনের জন্য), পুরনো অবস্থার পেজে নয়।
+  static Future<void> openMainApp({String? target}) async {
     try {
-      await _channel.invokeMethod('openApp');
+      await _channel.invokeMethod('openApp', {'target': target});
     } catch (_) {}
   }
 

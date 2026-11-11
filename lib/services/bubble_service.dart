@@ -41,6 +41,16 @@ class BubbleControl {
     } catch (_) {}
   }
 
+  /// বাবল থেকে মূল অ্যাপে আসার সময় সঙ্গে পাঠানো গন্তব্য (যেমন
+  /// 'backup') — একবারই পাওয়া যায়, পড়লেই মুছে যায়। না থাকলে null।
+  static Future<String?> takeBubbleTarget() async {
+    try {
+      return await _channel.invokeMethod<String>('takeBubbleTarget');
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<bool> startBubble() async {
     try {
       return await _channel.invokeMethod<bool>('startBubble') ?? false;

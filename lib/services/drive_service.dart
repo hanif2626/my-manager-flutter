@@ -58,7 +58,7 @@ class DriveService {
     // বাবলের ভাসমান উইন্ডোতে Google Sign-In চলে না (Activity লাগে) —
     // মূল অ্যাপ খুলে সেখানে সাইন-ইন করতে হবে।
     if (BubbleWindow.isBubble) {
-      await BubbleWindow.openMainApp();
+      await BubbleWindow.openMainApp(target: 'backup');
       lastError = 'মূল অ্যাপে সাইন-ইন করো';
       return false;
     }
