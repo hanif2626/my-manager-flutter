@@ -39,7 +39,7 @@ jobs:
           echo "${{ secrets.SIGNING_KEY }}" | base64 --decode --ignore-garbage > android/app/my-manager.jks
 
       - name: Build APK
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
         env:
           ALIAS: ${{ secrets.ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -50,7 +50,6 @@ jobs:
           mkdir -p output
           # file-gulo khuje ber kore output folder-e copy kora
           find build/app/outputs/flutter-apk/ -name "*arm64-v8a-release.apk" -exec cp {} output/MyManager-arm64.apk \;
-          find build/app/outputs/flutter-apk/ -name "*armeabi-v7a-release.apk" -exec cp {} output/MyManager-arm32.apk \;
           # jodi kono karone split na hoye ekti file toiri hoy
           find build/app/outputs/flutter-apk/ -name "app-release.apk" -exec cp {} output/MyManager-Full.apk \;
 
@@ -63,7 +62,6 @@ jobs:
           body: |
             ## 🚀 My Manager APK Updated
             - **MyManager-arm64.apk** (notun phone-er jonno)
-            - **MyManager-arm32.apk** (purano phone-er jonno)
             - **Build Number:** ${{ github.run_number }}
           files: output/*.apk
         env:
