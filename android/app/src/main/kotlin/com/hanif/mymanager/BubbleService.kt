@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
@@ -24,46 +23,35 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
-import io.flutter.FlutterInjector
-import io.flutter.embedding.android.FlutterTextureView
-import io.flutter.embedding.android.FlutterView
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.dart.DartExecutor.DartEntrypoint
-import io.flutter.plugin.common.MethodChannel
 import kotlin.math.hypot
 import kotlin.math.max
 
 /**
  * Messenger-এর চ্যাট হেডের মতো ভাসমান বাবল — নিজের ফোরগ্রাউন্ড সার্ভিস।
  *
- * তিনটি আলাদা WindowManager ভিউ, তিনটি আলাদা কাজ — এটাই আগের ব্যর্থতার
- * মূল শিক্ষা। আগের প্লাগইন একটাই Flutter ভিউকে গোল → প্যানেল রিসাইজ
- * করত, আর Flutter-এর ভেতরে ড্র্যাগ করত; তাতেই ট্যাপ-বনাম-ড্র্যাগ দ্বন্দ্ব,
- * রিসাইজ-গ্লিচ আর Vivo-তে আটকে যাওয়া। এখানে:
- * - ডট (dotView): নেটিভ Android ভিউ। ড্র্যাগ, ট্যাপ, কিনারায় স্ন্যাপ —
- *   সব নেটিভে। Flutter-এর সঙ্গে এর কোনো সম্পর্ক নেই, তাই আটকায় না।
- * - ভাসমান উইন্ডো (panelView): আলাদা FlutterView, নিজের FlutterEngine-এ
- *   `bubbleMain()` চালায় — ভেতরে ছোট প্যানেল নয়, পুরো অ্যাপটাই
- *   (MyManagerApp)। ডটে ট্যাপ করলে দেখায়/লুকায়; ডট তখনো স্ক্রিনে
- *   থাকে (উইন্ডোর উপরেও), তাই আবার ট্যাপ করলেই উইন্ডো লুকিয়ে যায়।
+ * পথ B (২০২৬-১১-১১): প্যানেল আর এই সার্ভিসের overlay উইন্ডোতে
+ * FlutterView হিসেবে চলে না — Service-উইন্ডোতে Activity-context,
+ * lifecycle আর সঠিক attach/detach ক্রম না থাকায় ভেতরের বাটন/টাচ
+ * অনিয়মিত হতো। এখন এই সার্ভিস শুধু দুটি নেটিভ overlay রাখে:
+ * - ডট (dotView): নেটিভ Android ভিউ — ড্র্যাগ, ট্যাপ, কিনারায় স্ন্যাপ।
+ *   ট্যাপ করলে BubbleActivity খোলে/বন্ধ হয় (প্যানেল = আসল Activity,
+ *   নিজের engine-এ পুরো অ্যাপ)।
  * - বন্ধ-চিহ্ন (dismissView): শুধু ড্র্যাগ করার সময় নিচের মাঝখানে
- *   দেখা যায়। ডটটা তার ওপরে ছাড়লেই বাবল বন্ধ (enabled=false লিখে
- *   সার্ভিস থামে)।
+ *   দেখা যায়। ডটটা তার ওপরে ছাড়লেই বাবল বন্ধ।
  *
- * কিবোর্ড: ডট FLAG_NOT_FOCUSABLE (নিচের অ্যাপের ফোকাস চুরি করে না),
- * প্যানেল FLAG_NOT_TOUCH_MODAL + ফোকাসেবল (TextField-এ কিবোর্ড আসে,
- * বাইরে ট্যাপ করলে নিচের অ্যাপও টাচ পায়)।
- *
- * ডাটা: উইন্ডোর engine আলাদা isolate — মূল অ্যাপের মেমরি/DB হ্যান্ডল
- * এখানে নেই। উইন্ডোর অ্যাপ নিজে একই SQLite ফাইল খোলে (ছোট লেনদেন),
- * আর মূল অ্যাপ DataSync-এর ২ সেকেন্ডের পোল + resume-চেকে তা ধরে ফেলে —
- * তাই engine-দুটোর মধ্যে কোনো বার্তা পাঠানোর দরকার নেই।
+ * প্যানেলের অবস্থা BubbleActivity নিজে intent দিয়ে জানায়
+ * (OPENED/RESUMED/PAUSED/CLOSED) — সার্ভিস তাতেই টগল ঠিক করে আর
+ * ডটকে প্যানেলের উপরে বসায়/আগের জায়গায় ফেরত নেয়।
  */
 class BubbleService : Service() {
 
     companion object {
         const val ACTION_START = "com.hanif.mymanager.bubble.START"
         const val ACTION_STOP = "com.hanif.mymanager.bubble.STOP"
+        const val ACTION_PANEL_OPENED = "com.hanif.mymanager.bubble.PANEL_OPENED"
+        const val ACTION_PANEL_RESUMED = "com.hanif.mymanager.bubble.PANEL_RESUMED"
+        const val ACTION_PANEL_PAUSED = "com.hanif.mymanager.bubble.PANEL_PAUSED"
+        const val ACTION_PANEL_CLOSED = "com.hanif.mymanager.bubble.PANEL_CLOSED"
 
         @Volatile
         var isRunning: Boolean = false
@@ -71,27 +59,24 @@ class BubbleService : Service() {
 
         private const val NOTIF_ID = 1001
         private const val NOTIF_CHANNEL_ID = "my_manager_bubble"
-        private const val PANEL_CHANNEL = "com.hanif.mymanager/bubble-panel"
     }
 
     private lateinit var windowManager: WindowManager
-    private var engine: FlutterEngine? = null
-    private var flutterView: FlutterView? = null
-    private var panelChannel: MethodChannel? = null
 
     private lateinit var dotView: FrameLayout
     private lateinit var dotParams: WindowManager.LayoutParams
     private lateinit var dismissView: FrameLayout
     private lateinit var dismissParams: WindowManager.LayoutParams
     private lateinit var dismissMark: TextView
-    private var panelParams: WindowManager.LayoutParams? = null
 
     private var dotAdded = false
     private var dismissAdded = false
-    private var panelAdded = false
+
+    // প্যানেল (BubbleActivity) আছে কিনা / সামনে দেখা যাচ্ছে কিনা।
+    private var panelExists = false
     private var panelVisible = false
 
-    // ডটের "বাড়ি" — উইন্ডো খুললে ডট উপরে বসে, লুকালে এখানে ফেরে।
+    // ডটের "বাড়ি" — প্যানেল খুললে ডট উপরে বসে, লুকালে এখানে ফেরে।
     private var dotHomeX = -1
     private var dotHomeY = -1
     private var dotParked = false
@@ -129,15 +114,31 @@ class BubbleService : Service() {
         screenW = w
         screenH = h
         dotSizePx = dp(64)
-        setupEngine()
         setupDismissView()
         setupDotView()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_PANEL_OPENED -> panelExists = true
+            ACTION_PANEL_RESUMED -> {
+                panelExists = true
+                panelVisible = true
+                parkDotAboveWindow()
+            }
+            ACTION_PANEL_PAUSED -> {
+                panelVisible = false
+                unparkDot()
+            }
+            ACTION_PANEL_CLOSED -> {
+                panelExists = false
+                panelVisible = false
+                unparkDot()
+            }
         }
         return START_STICKY
     }
@@ -145,12 +146,6 @@ class BubbleService : Service() {
     override fun onDestroy() {
         isRunning = false
         snapAnimator?.cancel()
-        try {
-            if (panelAdded) windowManager.removeView(flutterView)
-        } catch (_: Exception) {
-        }
-        panelAdded = false
-        panelVisible = false
         try {
             if (dismissAdded) windowManager.removeView(dismissView)
         } catch (_: Exception) {
@@ -161,17 +156,6 @@ class BubbleService : Service() {
         } catch (_: Exception) {
         }
         dotAdded = false
-        try {
-            flutterView?.detachFromFlutterEngine()
-        } catch (_: Exception) {
-        }
-        try {
-            engine?.destroy()
-        } catch (_: Exception) {
-        }
-        engine = null
-        flutterView = null
-        panelChannel = null
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (_: Exception) {
@@ -205,119 +189,6 @@ class BubbleService : Service() {
             .setContentIntent(pending)
             .setOngoing(true)
             .build()
-    }
-
-    // ── Flutter engine (প্যানেল) ───────────────────────────────────────
-
-    private fun setupEngine() {
-        try {
-            FlutterInjector.instance().flutterLoader()
-                .ensureInitializationComplete(applicationContext, null)
-        } catch (_: Exception) {
-        }
-        val eng = FlutterEngine(applicationContext)
-        val entrypoint = DartEntrypoint(
-            FlutterInjector.instance().flutterLoader().findAppBundlePath(),
-            "bubbleMain",
-        )
-        eng.dartExecutor.executeDartEntrypoint(entrypoint)
-        engine = eng
-        // TextureView দিয়ে রেন্ডার — ডিফল্ট SurfaceView ভাসমান উইন্ডোতে
-        // ছবি ঠিক আঁকে কিন্তু টাচ ইঞ্জিন পর্যন্ত পৌঁছায় না (z-index /
-        // input সমস্যা, v1553-এ ফোনে ধরা পড়েছে)। TextureView সাধারণ
-        // ভিউ-হায়ারার্কিতেই থাকে, তাই টাচ স্বাভাবিকভাবে কাজ করে।
-        // পারফরম্যান্স একটু কম হতে পারে, কিন্তু কাজ না করা বাবলের
-        // চেয়ে একটু ধীরে চলা বাবল ভালো।
-        val view = FlutterView(applicationContext, FlutterTextureView(applicationContext))
-        view.attachToFlutterEngine(eng)
-        flutterView = view
-        panelChannel = MethodChannel(eng.dartExecutor.binaryMessenger, PANEL_CHANNEL)
-            .apply {
-                setMethodCallHandler { call, result ->
-                    when (call.method) {
-                        "hidePanel" -> {
-                            hidePanel()
-                            result.success(true)
-                        }
-                        "closeBubble" -> {
-                            closeBubble()
-                            result.success(true)
-                        }
-                        "openApp" -> {
-                            openApp()
-                            result.success(true)
-                        }
-                        else -> result.notImplemented()
-                    }
-                }
-            }
-        // ভেতরে এখন পুরো অ্যাপ চলে — তাই মূল অ্যাপের ইঞ্জিনে যেসব চ্যানেল
-        // আছে, সেগুলো বাবলের ইঞ্জিনেও লাগবে, নইলে সেটিংস টগল, স্ক্রিনটাইম,
-        // জব নোটিফিকেশন আর অ্যাপ খোলা — কিছুই কাজ করবে না।
-        // ScreenTimeBridge/JobNotifBridge শুধু Context নেয় — সরাসরি চলে।
-        ScreenTimeBridge.register(eng, applicationContext)
-        JobNotifBridge.register(eng, applicationContext)
-        // বাবল নিয়ন্ত্রণ (MainActivity-র মতোই, শুধু সেটিংস খোলাটা
-        // Service-এর Context দিয়ে — Activity এখানে নেই)।
-        MethodChannel(eng.dartExecutor.binaryMessenger, BubbleControl.CHANNEL)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "isOverlayGranted" -> result.success(BubbleControl.isOverlayGranted(applicationContext))
-                    "isBubbleEnabled" -> result.success(BubbleControl.isBubbleEnabled(applicationContext))
-                    "isBubbleRunning" -> result.success(BubbleControl.isBubbleRunning())
-                    "openOverlaySettings" -> {
-                        BubbleControl.openOverlaySettingsFromService(applicationContext)
-                        result.success(true)
-                    }
-                    "startBubble" -> result.success(BubbleControl.startBubble(applicationContext))
-                    "stopBubble" -> {
-                        BubbleControl.stopBubble(applicationContext)
-                        result.success(true)
-                    }
-                    else -> result.notImplemented()
-                }
-            }
-        // অ্যাপ খোলা / ডায়াল / লিংক (MainActivity-র মতোই, শুধু
-        // applicationContext দিয়ে — Service-এ Activity নেই)।
-        MethodChannel(eng.dartExecutor.binaryMessenger, "com.hanif.mymanager/launcher")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "launchApp" -> {
-                        val pkg = call.argument<String>("package")
-                        val intent = pkg?.let { applicationContext.packageManager.getLaunchIntentForPackage(it) }
-                        if (intent != null) {
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            applicationContext.startActivity(intent)
-                            result.success(true)
-                        } else {
-                            result.success(false)
-                        }
-                    }
-                    "dial" -> {
-                        val number = call.argument<String>("number")
-                        try {
-                            val i = Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number ?: "")))
-                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            applicationContext.startActivity(i)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.success(false)
-                        }
-                    }
-                    "openUrl" -> {
-                        val url = call.argument<String>("url")
-                        try {
-                            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            applicationContext.startActivity(i)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.success(false)
-                        }
-                    }
-                    else -> result.notImplemented()
-                }
-            }
     }
 
     // ── ডট (নেটিভ) ────────────────────────────────────────────────────
@@ -409,7 +280,7 @@ class BubbleService : Service() {
                 } else if (event.actionMasked == MotionEvent.ACTION_UP &&
                     event.eventTime - downTime < 400
                 ) {
-                    // ট্যাপ (ড্র্যাগ নয়): ভাসমান উইন্ডো টগল — পুরো অ্যাপ ওপরে ভাসে।
+                    // ট্যাপ (ড্র্যাগ নয়): প্যানেল (BubbleActivity) টগল।
                     togglePanel()
                 }
                 dragging = false
@@ -445,7 +316,7 @@ class BubbleService : Service() {
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    // উইন্ডো খোলা থাকতে ডট টেনে সরালে "বাড়ি"ও সরে যাবে —
+                    // প্যানেল খোলা থাকতে ডট টেনে সরালে "বাড়ি"ও সরে যাবে —
                     // লুকালে ডট নতুন জায়গায় ফিরবে।
                     if (dotParked) {
                         dotHomeX = dotParams.x
@@ -512,53 +383,38 @@ class BubbleService : Service() {
         return hypot((cx - tx).toDouble(), (cy - ty).toDouble()) < dp(90)
     }
 
-    // ── প্যানেল (FlutterView) ──────────────────────────────────────────
+    // ── প্যানেল (BubbleActivity) ───────────────────────────────────────
 
     private fun togglePanel() {
-        if (panelVisible) hidePanel() else showPanel()
+        if (panelVisible) closePanel() else openPanel()
     }
 
-    private fun showPanel() {
-        val view = flutterView ?: return
-        // Messenger-এর মতো ভাসমান উইন্ডো: চারপাশে স্পষ্ট ফাঁকা — উপরে
-        // ১১০dp, পাশে ৩২dp, নিচে ১১০dp। প্রায় পুরো স্ক্রিন নয়।
-        val panelW = screenW - dp(64)
-        val panelH = screenH - dp(220)
-        panelParams = WindowManager.LayoutParams(
-            panelW, panelH,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // ফোকাসেবল (কিবোর্ড আসবে) + বাইরের টাচ নিচের অ্যাপে যাবে।
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = dp(32)
-            y = dp(110)
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+    /** প্যানেল খোলে বা লুকিয়ে থাকলে সামনে আনে। */
+    private fun openPanel() {
+        // overlay উইন্ডো (ডট) দৃশ্যমান থাকায় background থেকে Activity
+        // চালুর ছাড়ের আওতায় পড়ে (Android 10+)।
+        val intent = Intent(applicationContext, BubbleActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
         }
         try {
-            if (!panelAdded) {
-                windowManager.addView(view, panelParams)
-                panelAdded = true
-            } else {
-                windowManager.updateViewLayout(view, panelParams)
-            }
-            // উইন্ডো দেখানোর পর ফোকাস নেওয়া — কিবোর্ড/টাচ যাতে
-            // ভেতরের FlutterView-এ পৌঁছায়।
-            try {
-                view.requestFocus()
-            } catch (_: Exception) {
-            }
-            panelVisible = true
-            // ডটটা উইন্ডোর উপরে বসবে (ডানদিকের কোণার ঠিক উপরে) — গায়ে
-            // লেগে থাকবে না, যেকোনো সময় ট্যাপ করে লুকানো যাবে।
-            parkDotAboveWindow()
+            startActivity(intent)
         } catch (_: Exception) {
-            panelVisible = false
         }
     }
 
-    /** ডটকে উইন্ডোর উপরে বসায় (ডানদিকের কোণার ঠিক উপরে)। */
+    /** প্যানেল বন্ধ করে — Activity নিজে finish() হয়। */
+    private fun closePanel() {
+        val intent = Intent(applicationContext, BubbleActivity::class.java).apply {
+            action = BubbleActivity.ACTION_CLOSE
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** ডটকে প্যানেলের উপরে বসায় (ডানদিকের কোণার ঠিক উপরে)। */
     private fun parkDotAboveWindow() {
         try {
             if (!dotParked) {
@@ -566,15 +422,15 @@ class BubbleService : Service() {
                 dotHomeY = dotParams.y
                 dotParked = true
             }
-            val params = panelParams ?: return
-            dotParams.x = params.x + params.width - dotSizePx
-            dotParams.y = params.y - dotSizePx - dp(8)
+            // BubbleActivity-র জ্যামিতি: x=32dp, প্রস্থ = screenW−64dp, y=110dp।
+            dotParams.x = dp(32) + (screenW - dp(64)) - dotSizePx
+            dotParams.y = dp(110) - dotSizePx - dp(8)
             bringDotToFront()
         } catch (_: Exception) {
         }
     }
 
-    /** ডটকে আগের জায়গায় ফিরিয়ে দেয় (উইন্ডো লুকালে)। */
+    /** ডটকে আগের জায়গায় ফিরিয়ে দেয় (প্যানেল লুকালে/বন্ধ হলে)। */
     private fun unparkDot() {
         try {
             if (!dotParked) return
@@ -589,7 +445,7 @@ class BubbleService : Service() {
         }
     }
 
-    /** ডটকে সবচেয়ে সামনে আনে — উইন্ডো খুললেও ডট ট্যাপ করা যায়। */
+    /** ডটকে সবচেয়ে সামনে আনে — প্যানেল খুললেও ডট ট্যাপ করা যায়। */
     private fun bringDotToFront() {
         try {
             if (dotAdded) {
@@ -600,35 +456,9 @@ class BubbleService : Service() {
         }
     }
 
-    private fun hidePanel() {
-        unparkDot()
-        if (!panelAdded) {
-            panelVisible = false
-            return
-        }
-        try {
-            windowManager.removeView(flutterView)
-        } catch (_: Exception) {
-        }
-        panelAdded = false
-        panelVisible = false
-    }
-
-    private fun openApp() {
-        hidePanel()
-        val intent = Intent(applicationContext, MainActivity::class.java).apply {
-            action = Intent.ACTION_MAIN
-            addCategory(Intent.CATEGORY_LAUNCHER)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-        }
-        try {
-            startActivity(intent)
-        } catch (_: Exception) {
-        }
-    }
-
-    /** বাবল বন্ধ — X-এ ছাড়া, প্যানেলের ✕, বা Settings টগল — সব এখানেই আসে। */
+    /** বাবল বন্ধ — X-এ ছাড়া বা Settings টগল — সব এখানেই আসে। */
     private fun closeBubble() {
+        if (panelExists) closePanel()
         BubbleControl.stopBubble(applicationContext)
     }
 

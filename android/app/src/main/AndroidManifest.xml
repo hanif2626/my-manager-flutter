@@ -161,9 +161,22 @@
             android:theme="@style/AutofillTheme"
             android:windowSoftInputMode="adjustResize"/>
 
+        <!-- বাবলের ভাসমান প্যানেল (পথ B): আসল Activity — স্বচ্ছ থিম,
+             ছোট ভাসমান উইন্ডোর মাপ BubbleActivity নিজে বসায়। ডটে
+             ট্যাপ করলে BubbleService এটা খোলে/বন্ধ করে। -->
+        <activity
+            android:name=".BubbleActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/BubbleTheme"
+            android:windowSoftInputMode="adjustResize"/>
+
         <!-- Floating bubble (Messenger-style chat head): own foreground
-             service — no third-party overlay plugin anymore. The dot,
-             panel and drag-to-dismiss are all owned by BubbleService. -->
+             service — no third-party overlay plugin anymore. The dot and
+             drag-to-dismiss are owned by BubbleService; the panel is
+             BubbleActivity (a real Activity, not an overlay window). -->
         <service
             android:name=".BubbleService"
             android:exported="false"

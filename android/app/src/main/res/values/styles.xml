@@ -12,6 +12,15 @@
 
     <!-- Autofill picker: স্বচ্ছ উইন্ডো, যাতে অন্য অ্যাপের উপরে নিচ থেকে
          উঠে আসা কার্ডের মতো দেখায়, পুরো স্ক্রিন ঢেকে না। -->
+    <!-- বাবল প্যানেল: স্বচ্ছ ভাসমান Activity, ডিম ছাড়া — নিচের
+         অ্যাপ উজ্জ্বলই থাকে, আগের overlay প্যানেলের মতো। -->
+    <style name="BubbleTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+
     <style name="AutofillTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
