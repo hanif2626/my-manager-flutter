@@ -254,6 +254,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     DateTime? deadline = idea?.deadline != null
         ? DateTime.fromMillisecondsSinceEpoch(idea!.deadline!)
         : null;
+    // অতিরিক্ত অপশন (অগ্রাধিকার/Deadline/রিমাইন্ডার/ফাইল) ডিফল্টে
+    // লুকানো থাকে — প্রয়োজন পড়লে ব্যবহারকারী নিজে খুলবেন।
+    // শুধু Deadline আগে থেকে বসানো থাকলে খোলা অবস্থায় আসে।
+    bool moreOpen = idea?.deadline != null;
 
     final attachments = <_Attachment>[];
     bool isRecording = false;
@@ -403,13 +407,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
 
           return Padding(
             padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom,
-                left: 16, right: 16, top: 16),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                   Center(child: Container(width: 40, height: 4,
                       decoration: BoxDecoration(color: AppTheme.border,
                           borderRadius: BorderRadius.circular(2)))),
@@ -453,6 +461,30 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                   _field(descCtrl, 'বিবরণ (ঐচ্ছিক)...', maxLines: 3),
                   const SizedBox(height: 12),
 
+                  // ── আরও অপশন (ডিফল্টে লুকানো) ──────────────
+                  GestureDetector(
+                    onTap: () => setS(() => moreOpen = !moreOpen),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.bg3,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppTheme.border),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.tune_outlined, size: 16, color: AppTheme.textSecondary),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text('আরও অপশন — অগ্রাধিকার, Deadline, রিমাইন্ডার, ফাইল',
+                            style: TextStyle(color: AppTheme.textSecondary,
+                                fontSize: 12.5, fontWeight: FontWeight.w600))),
+                        Icon(moreOpen ? Icons.expand_less : Icons.expand_more,
+                            size: 18, color: AppTheme.textMuted),
+                      ]),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  if (moreOpen) ...[
                   // Priority
                    Text('অগ্রাধিকার:', style: TextStyle(
                       color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
@@ -671,9 +703,22 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       );
                     }),
                   ],
+                  ], // if (moreOpen)
 
-                  const SizedBox(height: 14),
-                  SizedBox(width: double.infinity, child: ElevatedButton.icon(
+                  const SizedBox(height: 8),
+                      ],
+                    ),
+                  ),
+                ),
+                // ── স্টিকি সেভ/আপডেট বাটন — স্ক্রল কলামের বাইরে,
+                // তাই কিবোর্ড উঠলেও সবসময় উপরে ভেসে থাকে। ──
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.bg2,
+                    border: Border(top: BorderSide(color: AppTheme.border)),
+                  ),
+                  child: SizedBox(width: double.infinity, child: ElevatedButton.icon(
                     onPressed: () async {
                       if (nameCtrl.text.trim().isEmpty) return;
                       await persist();
@@ -695,9 +740,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   )),
-                  const SizedBox(height: 20),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         },

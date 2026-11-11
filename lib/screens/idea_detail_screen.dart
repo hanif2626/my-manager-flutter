@@ -65,15 +65,17 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
         Container(width: 40, height: 4, decoration: BoxDecoration(
             color: AppTheme.border, borderRadius: BorderRadius.circular(2))),
         const SizedBox(height: 12),
-         Text('ফাইল যোগ করো', style: TextStyle(color: AppTheme.textPrimary,
+         Text('এন্ট্রি যোগ করো', style: TextStyle(color: AppTheme.textPrimary,
             fontSize: 15, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        _sheetTile(Icons.code_outlined, 'কোড / টেক্সট ফাইল', AppTheme.accent,
-            () { Navigator.pop(context); _addTextFile(); }),
-        _sheetTile(Icons.photo_library_outlined, 'গ্যালারি থেকে ছবি', AppTheme.green,
+        _sheetTile(Icons.photo_library_outlined, 'গ্যালারি থেকে ছবি + নোট', AppTheme.green,
             () { Navigator.pop(context); _addImage(ImageSource.gallery); }),
-        _sheetTile(Icons.camera_alt_outlined, 'ক্যামেরা দিয়ে ছবি', AppTheme.yellow,
+        _sheetTile(Icons.camera_alt_outlined, 'ক্যামেরা দিয়ে ছবি + নোট', AppTheme.yellow,
             () { Navigator.pop(context); _addImage(ImageSource.camera); }),
+        _sheetTile(Icons.sticky_note_2_outlined, 'শুধু নোট', AppTheme.accent,
+            () { Navigator.pop(context); _addNoteOnly(); }),
+        _sheetTile(Icons.code_outlined, 'কোড / টেক্সট ফাইল', AppTheme.textSecondary,
+            () { Navigator.pop(context); _addTextFile(); }),
         _sheetTile(Icons.attach_file_outlined, 'যেকোনো ফাইল (APK, PDF, ZIP...)', AppTheme.textSecondary,
             () { Navigator.pop(context); _addAnyFile(); }),
         const SizedBox(height: 8),
@@ -108,6 +110,54 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                 ideaId: _idea.id!, projectId: widget.project.id!,
                 name: nameCtrl.text.trim(), type: 'text',
                 content: contentCtrl.text, createdAt: n, updatedAt: n,
+              ));
+              if (ctx.mounted) Navigator.pop(ctx);
+              _load();
+            },
+            icon: const Icon(Icons.add, color: Colors.white, size: 16),
+            label: const Text('যোগ করো', style: TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+          )),
+          const SizedBox(height: 20),
+        ]),
+      ),
+    );
+  }
+
+  // ── ADD NOTE-ONLY ENTRY ───────────────────────────────
+  // একই সমস্যার আন্ডারে পরপর এন্ট্রি রাখার জন্য — শুধু লেখা,
+  // কোনো ছবি নেই। এন্ট্রি-স্ট্রিমে বড় লেখায় দেখায়।
+  Future<void> _addNoteOnly() async {
+    final noteCtrl = TextEditingController();
+    await showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: AppTheme.bg2,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            left: 16, right: 16, top: 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+           Text('শুধু নোট', style: TextStyle(
+              color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          _field(noteCtrl, 'নোট লিখো...', maxLines: 5),
+          const SizedBox(height: 12),
+          SizedBox(width: double.infinity, child: ElevatedButton.icon(
+            onPressed: () async {
+              final text = noteCtrl.text.trim();
+              if (text.isEmpty) return;
+              final n = now();
+              final firstLine = text.split('\n').first.trim();
+              final name = firstLine.length > 28
+                  ? firstLine.substring(0, 28)
+                  : (firstLine.isEmpty ? 'নোট' : firstLine);
+              await DBHelper.insertFile(IdeaFile(
+                ideaId: _idea.id!, projectId: widget.project.id!,
+                name: name, type: 'text',
+                content: text, createdAt: n, updatedAt: n,
               ));
               if (ctx.mounted) Navigator.pop(ctx);
               _load();
@@ -276,6 +326,27 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
         noteText.writeln('— ছবির ক্যাপশন —');
         for (final f in caps) {
           noteText.writeln('• ${f.name} — ${f.caption}');
+        }
+      }
+      // এন্ট্রি-স্ট্রিম ক্রমানুসারে — ছবি+নোট জোড়া যেভাবে অ্যাপে
+      // সাজানো, ZIP পড়লেও ঠিক সেই ক্রমেই বোঝা যাবে।
+      final stream = _files.where((f) => f.isImage || f.type == 'text').toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      if (stream.isNotEmpty) {
+        noteText.writeln();
+        noteText.writeln('— এন্ট্রিসমূহ (ক্রমানুসারে) —');
+        var idx = 0;
+        for (final f in stream) {
+          idx++;
+          if (f.isImage) {
+            noteText.writeln('$idx. 🖼 ছবি: ${f.name}');
+            if (f.caption != null && f.caption!.trim().isNotEmpty) {
+              noteText.writeln('   নোট: ${f.caption}');
+            }
+          } else {
+            noteText.writeln('$idx. 📝 নোট (${f.name}):');
+            noteText.writeln(f.content ?? '');
+          }
         }
       }
     }
@@ -498,6 +569,11 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final sc = statusConfig[_idea.status]!;
+    // এন্ট্রি-স্ট্রিম: ছবি (স্ক্রিনশট+নোট) আর টেক্সট নোট — তৈরির
+    // ক্রমে। বাকি সব (অডিও/ভিডিও/PDF/বাইনারি) আলাদা দলে।
+    final entries = _files.where((f) => f.isImage || f.type == 'text').toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final others = _files.where((f) => !f.isImage && f.type != 'text').toList();
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
@@ -560,7 +636,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                         data: _idea.description!,
                         selectable: true,
                         styleSheet: MarkdownStyleSheet(
-                          p: TextStyle(color: AppTheme.textPrimary, fontSize: 14.5, height: 1.65),
+                          p: TextStyle(color: AppTheme.textPrimary, fontSize: 15.5, height: 1.7),
                           h1: TextStyle(color: AppTheme.textPrimary, fontSize: 19, fontWeight: FontWeight.w800, height: 1.4),
                           h2: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800, height: 1.4),
                           h3: TextStyle(color: AppTheme.textPrimary, fontSize: 15.5, fontWeight: FontWeight.w700, height: 1.4),
@@ -585,7 +661,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                   child: Row(children: [
                     const Text('🗂️', style: TextStyle(fontSize: 15)),
                     const SizedBox(width: 6),
-                    Text('ফাইলসমূহ (${_files.length})',
+                    Text('এন্ট্রি (${entries.length})',
                         style:  TextStyle(color: AppTheme.textSecondary, fontSize: 13,
                             fontWeight: FontWeight.w600)),
                     const Spacer(),
@@ -606,38 +682,132 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                   ]),
                 ),
               ),
-              if (_files.isEmpty)
+              if (entries.isEmpty && others.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Text('📄', style: TextStyle(fontSize: 40)),
+                    const Text('📒', style: TextStyle(fontSize: 40)),
                     const SizedBox(height: 12),
-                     Text('কোনো ফাইল নেই', style: TextStyle(
+                     Text('কোনো এন্ট্রি নেই', style: TextStyle(
                         color: AppTheme.textSecondary, fontSize: 15)),
                     const SizedBox(height: 6),
-                     Text('+ যোগ করো বাটনে চাপো', style: TextStyle(
+                     Text('ছবি + নোট, বা শুধু নোট যোগ করো', style: TextStyle(
                         color: AppTheme.textMuted, fontSize: 13)),
                   ])),
                 )
-              else
+              else ...[
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (_, i) => Padding(
-                        padding: EdgeInsets.only(bottom: i == _files.length - 1 ? 0 : 8),
-                        child: _fileCard(_files[i]),
+                        padding: EdgeInsets.only(bottom: i == entries.length - 1 ? 0 : 14),
+                        child: _entryBlock(entries[i]),
                       ),
-                      childCount: _files.length,
+                      childCount: entries.length,
                     ),
                   ),
                 ),
+                if (others.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+                      child: Card(
+                        child: ExpansionTile(
+                          initiallyExpanded: false,
+                          shape: const RoundedRectangleBorder(),
+                          title: Text('📎 অন্যান্য ফাইল (${others.length})',
+                              style: TextStyle(color: AppTheme.textSecondary,
+                                  fontSize: 13, fontWeight: FontWeight.w600)),
+                          children: others.map((f) => Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                            child: _fileCard(f),
+                          )).toList(),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  const SliverToBoxAdapter(child: SizedBox(height: 68)),
+              ],
             ]),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddOptions,
         backgroundColor: AppTheme.accent, mini: true,
         child: const Icon(Icons.add, color: Colors.white),
       ),
+    );
+  }
+
+  // ── ENTRY BLOCK (ছবি+নোট / শুধু নোট) ─────────────────────
+  // একই আইডিয়ার আন্ডারে ক্রমানুসারে সাজানো এন্ট্রি: স্ক্রিনশটের
+  // নিচে তার নোট, বড় লেখায় (16px), পরিষ্কার ব্যাকগ্রাউন্ডে —
+  // কোনো খাতার লাইন নেই।
+  Widget _entryBlock(IdeaFile file) {
+    final when = DateTime.fromMillisecondsSinceEpoch(file.createdAt);
+    final whenLabel =
+        '${when.day}/${when.month} • ${when.hour.toString().padLeft(2, '0')}:${when.minute.toString().padLeft(2, '0')}';
+    final headLabel = file.isImage
+        ? '🖼️ স্ক্রিনশট'
+        : (file.name.contains('.') ? '📄 ${file.name}' : '📝 নোট');
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.bg2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text(headLabel, style: TextStyle(color: AppTheme.textMuted,
+              fontSize: 11.5, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 8),
+          Text(whenLabel, style: TextStyle(color: AppTheme.textMuted, fontSize: 11.5)),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => _showFileMenu(file),
+            child: Icon(Icons.more_horiz, size: 20, color: AppTheme.textMuted),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        if (file.isImage && file.content != null)
+          GestureDetector(
+            onTap: () async {
+              await Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ImageViewerScreen(file: file)));
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(base64Decode(file.content!),
+                  width: double.infinity, fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => Container(
+                    padding: const EdgeInsets.all(20),
+                    alignment: Alignment.center,
+                    child: Text('ছবি লোড হয়নি',
+                        style: TextStyle(color: AppTheme.textMuted)),
+                  )),
+            ),
+          ),
+        if (file.isImage && file.caption != null && file.caption!.trim().isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(file.caption!, style: TextStyle(
+              color: AppTheme.textPrimary, fontSize: 16, height: 1.55)),
+        ],
+        if (!file.isImage)
+          GestureDetector(
+            onTap: () async {
+              await Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => FileEditorScreen(file: file)));
+              _load();
+            },
+            child: Text(
+              (file.content == null || file.content!.trim().isEmpty)
+                  ? '(খালি নোট)' : file.content!,
+              style: TextStyle(
+                  color: AppTheme.textPrimary, fontSize: 16, height: 1.6),
+            ),
+          ),
+      ]),
     );
   }
 
