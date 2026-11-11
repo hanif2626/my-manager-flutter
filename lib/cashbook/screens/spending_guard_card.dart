@@ -6,8 +6,9 @@ import '../services/spending_guard.dart';
 const _red = Color(0xFFDC2626);
 const _amber = Color(0xFFF59E0B);
 
-/// ক্যাশবুকের উপরের খরচ-প্রহরী কার্ড। সব ঠিক থাকলে ছোট সবুজ লাইন; জরুরি খরচের টাকা
-/// কমে এলে (আবশ্যিক খরচের কাছাকাছি গেলে) বড়, লাল, স্পন্দিত কার্ড — চোখ এড়ানো কঠিন।
+/// ক্যাশবুকের উপরের খরচ-প্রহরী কার্ড — শান্ত তথ্য-কার্ড: ব্যালেন্স, বাকি
+/// আবশ্যিক খরচ আর নিরাপদ খরচের হিসাব। সতর্কতা অ্যাপের ভেতরে নয়,
+/// নোটিফিকেশন বারে থাকে (ব্যবহারকারীর সিদ্ধান্ত, ২০২৬-১১-১১)।
 class SpendingGuardCard extends StatefulWidget {
   /// "আবশ্যিক খরচ দেখো" বাটনে ট্যাপ করলে আবশ্যিক খরচ ট্যাবে যেতে।
   final VoidCallback? onOpenEssentials;
@@ -15,11 +16,9 @@ class SpendingGuardCard extends StatefulWidget {
   @override State<SpendingGuardCard> createState() => _SpendingGuardCardState();
 }
 
-class _SpendingGuardCardState extends State<SpendingGuardCard> with SingleTickerProviderStateMixin {
+class _SpendingGuardCardState extends State<SpendingGuardCard> {
   GuardReport? _r;
   bool _open = false;
-  late final AnimationController _pulse =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat(reverse: true);
 
   @override
   void initState() {
@@ -31,7 +30,6 @@ class _SpendingGuardCardState extends State<SpendingGuardCard> with SingleTicker
   @override
   void dispose() {
     SpendingGuard.changes.removeListener(_load);
-    _pulse.dispose();
     super.dispose();
   }
 
@@ -59,7 +57,10 @@ class _SpendingGuardCardState extends State<SpendingGuardCard> with SingleTicker
         ),
       );
     }
-    return r.level == GuardLevel.ok ? _calm(r) : _alarm(r);
+    // অ্যাপের ভেতরে আর লাল অ্যালার্ম কার্ড নয় (ব্যবহারকারীর সিদ্ধান্ত,
+    // ২০২৬-১১-১১) — সব অবস্থায় এই শান্ত তথ্য-কার্ডটাই থাকে; আসল
+    // সতর্কতা এখন নোটিফিকেশন বারে (SpendingGuard.syncOngoing)।
+    return _calm(r);
   }
 
   // ───────────── সব ঠিক ─────────────
@@ -101,82 +102,6 @@ class _SpendingGuardCardState extends State<SpendingGuardCard> with SingleTicker
                   ),
             ]),
           ),
-        ),
-      ),
-    );
-  }
-
-  // ───────────── বড় লাল সতর্কতা ─────────────
-
-  Widget _alarm(GuardReport r) {
-    final danger = r.level == GuardLevel.danger;
-    final base = danger ? _red : _amber;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-      child: AnimatedBuilder(
-        animation: _pulse,
-        builder: (_, child) => Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            gradient: LinearGradient(
-              colors: [base, Color.lerp(base, Colors.black, 0.28)!],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: base.withOpacity(0.25 + 0.35 * _pulse.value),
-                blurRadius: 10 + 14 * _pulse.value,
-                spreadRadius: 1 + 2 * _pulse.value,
-              ),
-            ],
-          ),
-          child: child,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(r.headline,
-                style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w900, height: 1.25)),
-            const SizedBox(height: 8),
-            Text(r.essentialsLine,
-                style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.4)),
-            if (r.detailLines.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              for (final l in r.detailLines)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text('• $l', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 12.5, height: 1.35)),
-                ),
-            ],
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.black.withOpacity(0.22), borderRadius: BorderRadius.circular(10)),
-              child: Text(
-                danger
-                    ? 'টাকা কম খরচ করুন — আবশ্যিক কাজ আগে করুন। অকারণ খরচ আজ বন্ধ।'
-                    : 'সাবধান! টাকা কম খরচ করুন — আবশ্যিক খরচ আগে মেটান। অযাচিত খরচ এখনই থামান।',
-                style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700, height: 1.4),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(children: [
-              if (widget.onOpenEssentials != null)
-                TextButton(
-                  style: TextButton.styleFrom(foregroundColor: Colors.white),
-                  onPressed: widget.onOpenEssentials,
-                  child: const Text('আবশ্যিক খরচ দেখো'),
-                ),
-              const Spacer(),
-              TextButton.icon(
-                style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                onPressed: () => showGuardSettings(context),
-                icon: const Icon(Icons.tune_rounded, size: 16),
-                label: const Text('সেটিংস'),
-              ),
-            ]),
-          ]),
         ),
       ),
     );

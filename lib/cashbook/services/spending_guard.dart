@@ -86,7 +86,8 @@ class GuardReport {
 }
 
 /// "খরচ-প্রহরী": ক্যাশবুকে এখন যত টাকা আছে তা এ মাসের বাকি আবশ্যিক খরচের কাছাকাছি গেলে
-/// বড় লাল সতর্কতা দেয় (ক্যাশবুকের উপরে, খরচ লেখার সময়, আর নির্দিষ্ট ব্যবধানে নোটিফিকেশনে)।
+/// নোটিফিকেশন বারে স্থায়ী সতর্কতা থাকে (অ্যাপের ভেতরে লাল কার্ড নয় — ব্যবহারকারীর
+/// সিদ্ধান্ত, ২০২৬-১১-১১); সঙ্গে খরচ লেখার সময় জানান ও প্রতিদিন ৩ বেলার নোটিফিকেশন।
 class SpendingGuard {
   static final ValueNotifier<int> changes = ValueNotifier(0);
 
@@ -164,6 +165,7 @@ class SpendingGuard {
       _rearmTimer?.cancel();
       _rearmTimer = Timer(const Duration(seconds: 2), () {
         rearmSlots().catchError((_) {});
+        syncOngoing().catchError((_) {});
       });
     });
   }
@@ -236,12 +238,38 @@ class SpendingGuard {
 
   /// অ্যাপ চালু / রিজিউম / ব্যাকগ্রাউন্ড টাস্ক / সেভের পর ডাকা হয়: ৩ বেলার নোটিফিকেশন ঠিকঠাক বসিয়ে রাখে।
   /// [force] = সেটিংসের "পরীক্ষা" বাটন — এখনই একটা নোটিফিকেশন দেখায়।
+  /// নোটিফিকেশন বারের স্থায়ী সতর্কতা হালনাগাদ করে: অবস্থা near/danger
+  /// হলে দেখায়, ঠিক হয়ে গেলে (বা প্রহরী বন্ধ থাকলে) সরিয়ে দেয়।
+  /// idempotent — অ্যাপ চালুতে, ব্যাকগ্রাউন্ড চেকে আর প্রতিটা ডাটা
+  /// বদলের পর ডাকা হয়।
+  static Future<void> syncOngoing() async {
+    if (!enabled) {
+      await CashbookNotificationService.cancelGuardOngoing();
+      return;
+    }
+    final r = await assess();
+    if (r.level == GuardLevel.ok) {
+      await CashbookNotificationService.cancelGuardOngoing();
+      return;
+    }
+    await CashbookNotificationService.showGuardOngoing(
+      title: r.headline,
+      body: r.notificationBody,
+      danger: r.level == GuardLevel.danger,
+    );
+  }
+
   static Future<void> nudgeIfNeeded({bool force = false}) async {
     _listenForChanges();
     try {
       await rearmSlots();
     } catch (e) {
       debugPrint('SpendingGuard rearm failed: $e');
+    }
+    try {
+      await syncOngoing();
+    } catch (e) {
+      debugPrint('SpendingGuard ongoing sync failed: $e');
     }
     if (!force) return;
 

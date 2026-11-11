@@ -172,6 +172,37 @@ class CashbookNotificationService {
     await _plugin.show(7800, title, body.split('\n').first, NotificationDetails(android: details));
   }
 
+  // ───────────── স্থায়ী নোটিফিকেশন-বার সতর্কতা (আইডি ৭৮২০) ─────────────
+  static const _guardOngoingId = 7820;
+
+  /// ব্যালেন্স আবশ্যিক খরচের নিচে/কাছাকাছি থাকলে নোটিফিকেশন বারে
+  /// লেগে-থাকা (ongoing) সতর্কতা — অবস্থা না বদলানো পর্যন্ত থাকবে,
+  /// যাতে যেকোনো সময় ফোনের উপর দিকে দেখে আগাম পরিকল্পনা করা যায়।
+  /// danger হলে লাল, কাছাকাছি হলে হলুদ অ্যাকসেন্ট।
+  static Future<void> showGuardOngoing({required String title, required String body, required bool danger}) async {
+    await _init();
+    final details = AndroidNotificationDetails(
+      'spending_guard_channel',
+      'খরচ সতর্কতা',
+      channelDescription: 'ব্যালেন্স আবশ্যিক খরচের তুলনায় কমে গেলে নোটিফিকেশন বারে স্থায়ী সতর্কতা',
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: '@mipmap/ic_launcher',
+      color: danger ? const Color(0xFFDC2626) : const Color(0xFFF59E0B),
+      colorized: true,
+      category: AndroidNotificationCategory.reminder,
+      ongoing: true,
+      autoCancel: false,
+      styleInformation: BigTextStyleInformation(body, contentTitle: title),
+    );
+    await _plugin.show(_guardOngoingId, title, body.split('\n').first, NotificationDetails(android: details));
+  }
+
+  static Future<void> cancelGuardOngoing() async {
+    await _init();
+    await _plugin.cancel(_guardOngoingId);
+  }
+
   // ───────────── খরচ-প্রহরীর ৩ বেলার সতর্কতা (আইডি ৭৮১০–৭৮১৯) ─────────────
   static const _guardSlotBase = 7810;
   static const _guardSlotCount = 10;
