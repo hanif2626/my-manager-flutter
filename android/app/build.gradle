@@ -28,12 +28,6 @@ android {
         versionCode 24
         versionName "5.3.2"
         multiDexEnabled true
-        // 2026-11-11: sudhu arm64-v8a — 32-bit APK dorkar nei, storage banchate
-        // bad deya holo (malik-er nirdesh). Flutter split-per-abi ei filter
-        // menei shudhu arm64 APK banabe.
-        ndk {
-            abiFilters 'arm64-v8a'
-        }
     }
 
     // ক্র্যাশের মূল কারণ (ClassCastException: TinylogLoggingProvider cannot be
