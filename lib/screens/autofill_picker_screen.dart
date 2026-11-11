@@ -7,7 +7,7 @@ import '../services/vault_service.dart';
 import '../services/auth_service.dart';
 import '../widgets/app_theme.dart';
 
-enum _Mode { loading, authFailed, pick, save }
+enum _Mode { loading, authFailed, pick, save, noMatch }
 
 /// autofillEntryPoint()-এর রুট উইজেট। অন্য অ্যাপে লগইন ফর্মে ট্যাপ করলে
 /// (পাসওয়ার্ড বাছাই) অথবা নতুন লগইন সাবমিট করলে (সেভ সাজেশন) Android
@@ -19,6 +19,8 @@ enum _Mode { loading, authFailed, pick, save }
 ///  • ২ মিনিটের মধ্যে আবার যাচাই চায় না
 ///  • এই সাইটে শেষবার ব্যবহৃত একাউন্ট সবার উপরে
 ///  • সেভের সময় একই লগইন আগে থেকে থাকলে চুপচাপ বন্ধ, পাসওয়ার্ড বদলালে "আপডেট"
+///  • মিল না থাকলে চুপচাপ বন্ধ নয় — "সব লগইন দেখাও" শিট আসে
+///  • হাতে বেছে নেওয়া লগইন ওই সাইটের সাথে মনে থাকে — পরের বার নিজে নিজে মিলে যায়
 class AutofillPickerApp extends StatefulWidget {
   const AutofillPickerApp({super.key});
   @override State<AutofillPickerApp> createState() => _AutofillPickerAppState();
@@ -36,6 +38,8 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
   bool _saving = false;
   String _siteKey = '';
   String? _lastUsedId;
+  // এই সাইটে আগে হাতে বেছে নেওয়া এন্ট্রির id-গুলো (শেখা সংযোগ)।
+  Set<String> _assocIds = {};
   String _cat = 'login';
 
   // অটোফিলে যেসব ক্যাটাগরি দেখানো হবে (ক্রমও এটাই)। কার্ড বাদ — কার্ডের নম্বর
@@ -108,22 +112,53 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
     final onlySaved = prefs.getBool(onlySavedKey) ?? true;
     await _prepare(metadata, prefs);
     final hasMatch = _matches.isNotEmpty;
-    if (!hasMatch && (onlySaved || _all.isEmpty)) {
+    if (!hasMatch && _all.isEmpty) {
       _finish();
       return;
     }
+    // মিল নেই, কিন্তু ভল্টে লগইন আছে: আগে এখানে চুপচাপ বন্ধ হয়ে যেত আর
+    // ব্যবহারকারীকে অ্যাপ খুলে সার্চ করতে হতো। এখন ছোট্ট শিটে জানিয়ে
+    // "সব লগইন দেখাও"-এর সুযোগ — এক ট্যাপেই পুরো তালিকা (যাচাইসহ)।
+    // এই শিটে কোনো গোপন তথ্য থাকে না, তাই যাচাই ছাড়াই দেখানো নিরাপদ।
+    if (!hasMatch && onlySaved) {
+      if (mounted) setState(() => _mode = _Mode.noMatch);
+      return;
+    }
 
-    final last = prefs.getInt(_lastAuthKey) ?? 0;
-    final fresh = DateTime.now().millisecondsSinceEpoch - last < _authGraceSeconds * 1000;
-    if (!fresh) {
-      final ok = await AuthService.authenticate(reason: 'Autofill-এর জন্য যাচাই করো');
-      if (!ok) {
-        if (mounted) setState(() => _mode = _Mode.authFailed);
-        return;
-      }
-      await prefs.setInt(_lastAuthKey, DateTime.now().millisecondsSinceEpoch);
+    final ok = await _ensureAuth(prefs);
+    if (!ok) {
+      if (mounted) setState(() => _mode = _Mode.authFailed);
+      return;
     }
     await _fillOrPick();
+  }
+
+  Future<bool> _ensureAuth(SharedPreferences prefs) async {
+    final last = prefs.getInt(_lastAuthKey) ?? 0;
+    final fresh = DateTime.now().millisecondsSinceEpoch - last < _authGraceSeconds * 1000;
+    if (fresh) return true;
+    final ok = await AuthService.authenticate(reason: 'Autofill-এর জন্য যাচাই করো');
+    if (ok) {
+      await prefs.setInt(_lastAuthKey, DateTime.now().millisecondsSinceEpoch);
+    }
+    return ok;
+  }
+
+  /// "মিল নেই" শিট থেকে: যাচাই করে পুরো লগইন তালিকা খোলো।
+  Future<void> _showAllLogins() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final ok = await _ensureAuth(prefs);
+    if (!ok) {
+      if (mounted) setState(() => _mode = _Mode.authFailed);
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _showAll = true;
+        _mode = _Mode.pick;
+      });
+    }
   }
 
   String _registrableDomain(String host) {
@@ -162,7 +197,12 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
   bool _sameSite(String? url, String? label) {
     if (url == null || label == null || url.isEmpty || label.isEmpty) return false;
     if (url == label) return true;
-    return _registrableDomain(_hostOf(url)) == _registrableDomain(_hostOf(label));
+    if (_registrableDomain(_hostOf(url)) == _registrableDomain(_hostOf(label))) return true;
+    // অ্যাপের প্যাকেজ (com.redotpay.app) বনাম ওয়েব ডোমেইন (redotpay.com):
+    // মূল নামটা এক হলে একই সাইট ধরো — নইলে সেভের সময় ডুপ্লিকেট এন্ট্রি হয়।
+    final la = _registrableDomain(_hostOf(url)).split('.').first;
+    final lb = _registrableDomain(_hostOf(label)).split('.').first;
+    return la.length >= 4 && la == lb;
   }
 
   Future<void> _showSave(AutofillMetadata metadata) async {
@@ -217,6 +257,10 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
     _siteKey = wantedDomains.isNotEmpty ? wantedDomains.first : (pkgs.isNotEmpty ? pkgs.first : '');
     _saveSiteLabel = domains.isNotEmpty ? domains.first : (pkgs.isNotEmpty ? pkgs.first : null);
     _lastUsedId = _siteKey.isEmpty ? null : prefs.getString('af_last_$_siteKey');
+    final assocRaw = _siteKey.isEmpty ? null : prefs.getString('af_assoc_$_siteKey');
+    _assocIds = (assocRaw == null || assocRaw.isEmpty)
+        ? <String>{}
+        : assocRaw.split(',').where((x) => x.isNotEmpty).toSet();
 
     final matches = logins.where((e) {
       final url = (e.url ?? '').toLowerCase();
@@ -237,7 +281,17 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
       return false;
     }).toList();
 
-    int rank(VaultEntry e) => e.id == _lastUsedId ? 0 : 1;
+    // শেখা সংযোগ: আগে এই সাইটে হাতে বেছে নেওয়া এন্ট্রি — URL/টাইটেলে
+    // নিয়মমতো মিল না থাকলেও মিল হিসেবে ধরো (একবার বাছলেই পরের বার আসবে)।
+    if (_assocIds.isNotEmpty) {
+      final have = matches.map((e) => e.id).toSet();
+      for (final e in logins) {
+        if (_assocIds.contains(e.id) && !have.contains(e.id)) matches.add(e);
+      }
+    }
+
+    int rank(VaultEntry e) =>
+        e.id == _lastUsedId ? 0 : (_assocIds.contains(e.id) ? 1 : 2);
     int cmp(VaultEntry a, VaultEntry b) {
       final r = rank(a).compareTo(rank(b));
       return r != 0 ? r : b.updatedAt.compareTo(a.updatedAt);
@@ -269,6 +323,14 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
       if (_siteKey.isNotEmpty) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('af_last_$_siteKey', e.id);
+        // হাতে বেছে নেওয়া (নিয়মে মেলেনি) লগইন হলে এই সাইটের সাথে সংযোগ
+        // মনে রাখো — পরের বার আর খুঁজতে হবে না।
+        if (e.type == 'login' && !_matches.any((m) => m.id == e.id)) {
+          final ids = <String>[..._assocIds.where((i) => i != e.id), e.id];
+          final keep = ids.length > 3 ? ids.sublist(ids.length - 3) : ids;
+          await prefs.setString('af_assoc_$_siteKey', keep.join(','));
+          _assocIds = keep.toSet();
+        }
       }
       await AutofillService().resultWithDatasets([
         PwDataset(label: e.title, username: e.username ?? '', password: e.secret),
@@ -393,6 +455,9 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
         break;
       case _Mode.save:
         body = _buildSave();
+        break;
+      case _Mode.noMatch:
+        body = _buildNoMatch();
         break;
     }
 
@@ -551,6 +616,29 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildNoMatch() {
+    final site = _saveSiteLabel;
+    return _stateBox(
+      Icon(Icons.search_off_rounded, size: 34, color: AppTheme.textMuted),
+      site != null && site.isNotEmpty
+          ? '${_pretty(site)}-এর জন্য সেভ করা লগইন পাইনি'
+          : 'এই সাইটের জন্য সেভ করা লগইন পাইনি',
+      action: Column(mainAxisSize: MainAxisSize.min, children: [
+        FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.accent),
+          onPressed: _showAllLogins,
+          icon: const Icon(Icons.list_rounded, size: 20),
+          label: const Text('সব লগইন দেখাও'),
+        ),
+        const SizedBox(height: 6),
+        TextButton(
+          onPressed: _finish,
+          child: Text('বন্ধ করো', style: TextStyle(color: AppTheme.textMuted)),
+        ),
+      ]),
     );
   }
 
