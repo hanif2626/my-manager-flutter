@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -124,11 +125,66 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
     );
   }
 
+  // ছবি যোগের সময়ই ওই ছবিটার নিজের ক্যাপশন — Facebook/WhatsApp-এর মতো।
+  // খালি রাখলে ক্যাপশন ছাড়াই সেভ হবে। বাতিল করলে ছবিও যোগ হবে না।
+  Future<String?> _askImageCaption() async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bg3,
+        title: Text('ছবির ক্যাপশন', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        content: TextField(controller: ctrl, autofocus: true, maxLines: 3, minLines: 1,
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'এই ছবিটা সম্পর্কে লিখুন (না চাইলে খালি রাখুন)',
+            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+          )),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('বাতিল')),
+          TextButton(onPressed: () => Navigator.pop(context, ctrl.text),
+              child: const Text('সেভ করো')),
+        ],
+      ));
+  }
+
+  Future<void> _editCaption(IdeaFile file) async {
+    final ctrl = TextEditingController(text: file.caption ?? '');
+    final result = await showDialog<String>(context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bg3,
+        title: Text('ক্যাপশন', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        content: TextField(controller: ctrl, autofocus: true, maxLines: 3, minLines: 1,
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'এই ছবিটা সম্পর্কে লিখুন',
+            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+          )),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('বাতিল')),
+          TextButton(onPressed: () => Navigator.pop(context, ctrl.text),
+              child: const Text('সেভ করো')),
+        ],
+      ));
+    if (result == null) return;
+    final cap = result.trim();
+    await DBHelper.updateFile(IdeaFile(
+      id: file.id, ideaId: file.ideaId, projectId: file.projectId,
+      name: file.name, type: file.type, content: file.content,
+      caption: cap.isEmpty ? null : cap,
+      version: file.version, createdAt: file.createdAt,
+      updatedAt: DateTime.now().millisecondsSinceEpoch,
+    ));
+    _load();
+  }
+
   // ── ADD IMAGE ─────────────────────────────────────────
   Future<void> _addImage(ImageSource source) async {
     try {
       final picked = await BubblePicker.pickImage(source: source, imageQuality: 85);
       if (picked == null) return;
+      if (!mounted) return;
+      final caption = await _askImageCaption();
+      if (caption == null) return;
       final bytes = await picked.readAsBytes();
       final b64 = base64Encode(bytes);
       final ext = picked.name.split('.').last.toLowerCase();
@@ -137,7 +193,9 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
       final n = now();
       await DBHelper.insertFile(IdeaFile(
         ideaId: _idea.id!, projectId: widget.project.id!,
-        name: name, type: 'image', content: b64, createdAt: n, updatedAt: n,
+        name: name, type: 'image', content: b64,
+        caption: caption.trim().isEmpty ? null : caption.trim(),
+        createdAt: n, updatedAt: n,
       ));
       _load();
     } catch (e) {
@@ -204,6 +262,22 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
       ..writeln();
     if (_idea.description != null && _idea.description!.trim().isNotEmpty) {
       noteText..writeln('— নোট —')..writeln(_idea.description);
+    }
+    if (_files.isNotEmpty) {
+      noteText.writeln();
+      noteText.writeln('— ফাইলসমূহ (${_files.length}) —');
+      for (final f in _files) {
+        noteText.writeln('• ${f.name}');
+      }
+      final caps = _files.where((f) =>
+          f.isImage && f.caption != null && f.caption!.trim().isNotEmpty).toList();
+      if (caps.isNotEmpty) {
+        noteText.writeln();
+        noteText.writeln('— ছবির ক্যাপশন —');
+        for (final f in caps) {
+          noteText.writeln('• ${f.name} — ${f.caption}');
+        }
+      }
     }
     final noteBytes = utf8.encode(noteText.toString());
     archive.addFile(ArchiveFile('note.txt', noteBytes.length, noteBytes));
@@ -378,6 +452,12 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
             await Navigator.push(context, MaterialPageRoute(
                 builder: (_) => ImageViewerScreen(file: file)));
           }),
+        if (file.isImage)
+          _sheetTile(Icons.closed_caption_outlined,
+            (file.caption == null || file.caption!.trim().isEmpty)
+                ? 'ক্যাপশন যোগ করো' : 'ক্যাপশন বদলাও',
+            AppTheme.textSecondary,
+            () { Navigator.pop(context); _editCaption(file); }),
         if (file.isPdf)
           _sheetTile(Icons.picture_as_pdf_outlined, 'PDF দেখো (In-App)', AppTheme.red, () async {
             Navigator.pop(context);
@@ -456,12 +536,48 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
           : CustomScrollView(slivers: [
-              if (_idea.description != null && _idea.description!.isNotEmpty)
+              if (_idea.description != null && _idea.description!.trim().isNotEmpty)
                 SliverToBoxAdapter(
-                  child: Container(width: double.infinity, padding: const EdgeInsets.all(14),
+                  child: Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                    decoration: BoxDecoration(
                       color: AppTheme.bg2,
-                      child: Text(_idea.description!, style:  TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 13, height: 1.5))),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.border),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        const Text('📝', style: TextStyle(fontSize: 13)),
+                        const SizedBox(width: 6),
+                        Text('নোট', style: TextStyle(
+                            color: AppTheme.textMuted, fontSize: 12,
+                            fontWeight: FontWeight.w700)),
+                      ]),
+                      const SizedBox(height: 8),
+                      MarkdownBody(
+                        data: _idea.description!,
+                        selectable: true,
+                        styleSheet: MarkdownStyleSheet(
+                          p: TextStyle(color: AppTheme.textPrimary, fontSize: 14.5, height: 1.65),
+                          h1: TextStyle(color: AppTheme.textPrimary, fontSize: 19, fontWeight: FontWeight.w800, height: 1.4),
+                          h2: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800, height: 1.4),
+                          h3: TextStyle(color: AppTheme.textPrimary, fontSize: 15.5, fontWeight: FontWeight.w700, height: 1.4),
+                          strong: const TextStyle(fontWeight: FontWeight.w800),
+                          listBullet: TextStyle(color: AppTheme.accent, fontSize: 14.5),
+                          code: TextStyle(color: AppTheme.accent, fontSize: 13,
+                              fontFamily: 'monospace', backgroundColor: AppTheme.bg3),
+                          codeblockDecoration: BoxDecoration(
+                              color: AppTheme.bg3, borderRadius: BorderRadius.circular(10)),
+                          blockquote: TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.6),
+                          blockquoteDecoration: BoxDecoration(
+                              color: AppTheme.bg3, borderRadius: BorderRadius.circular(10)),
+                          a: TextStyle(color: AppTheme.accent, decoration: TextDecoration.underline),
+                        ),
+                      ),
+                    ]),
+                  ),
                 ),
               SliverToBoxAdapter(
                 child: Padding(
@@ -617,6 +733,11 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                       color: Color(0xFF2196F3), fontSize: 11)),
                 ],
               ]),
+              if (file.caption != null && file.caption!.trim().isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Text('💬 ${file.caption!}', maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.4)),
+              ],
             ])),
             GestureDetector(
               onTap: () => _showFileMenu(file),

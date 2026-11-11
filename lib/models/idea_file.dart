@@ -7,13 +7,14 @@ class IdeaFile {
   final String name;
   final String type; // text, image, audio, binary
   final String? content; // base64 for binary/image, plain for text
+  final String? caption; // ছবির নিজের ক্যাপশন/নোট (শুধু ওই ছবির জন্য)
   final int version;
   final int createdAt;
   final int updatedAt;
 
   IdeaFile({
     this.id, required this.ideaId, required this.projectId,
-    required this.name, required this.type, this.content,
+    required this.name, required this.type, this.content, this.caption,
     this.version = 1, required this.createdAt, required this.updatedAt,
   });
 
@@ -62,6 +63,7 @@ class IdeaFile {
   factory IdeaFile.fromMap(Map<String, dynamic> m) => IdeaFile(
     id: m['id'], ideaId: m['idea_id'], projectId: m['project_id'],
     name: m['name'], type: m['type'], content: m['content'],
+    caption: m['caption'],
     version: m['version'] ?? 1,
     createdAt: m['created_at'], updatedAt: m['updated_at'],
   );
@@ -69,19 +71,20 @@ class IdeaFile {
   Map<String, dynamic> toMap() => {
     if (id != null) 'id': id,
     'idea_id': ideaId, 'project_id': projectId,
-    'name': name, 'type': type, 'content': content,
+    'name': name, 'type': type, 'content': content, 'caption': caption,
     'version': version, 'created_at': createdAt, 'updated_at': updatedAt,
   };
 
   IdeaFile copyWith({
     int? id, int? ideaId, int? projectId, String? name,
-    String? type, String? content, int? version,
+    String? type, String? content, String? caption, int? version,
     int? createdAt, int? updatedAt,
   }) => IdeaFile(
     id: id ?? this.id, ideaId: ideaId ?? this.ideaId,
     projectId: projectId ?? this.projectId,
     name: name ?? this.name, type: type ?? this.type,
-    content: content ?? this.content, version: version ?? this.version,
+    content: content ?? this.content, caption: caption ?? this.caption,
+    version: version ?? this.version,
     createdAt: createdAt ?? this.createdAt, updatedAt: updatedAt ?? this.updatedAt,
   );
 }

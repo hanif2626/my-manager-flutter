@@ -7,7 +7,7 @@ import '../models/checklist_item.dart';
 
 class DBHelper {
   static Database? _db;
-  static const _version = 7;
+  static const _version = 8;
 
   static Future<Database> get db async {
     _db ??= await _initDB();
@@ -59,6 +59,7 @@ class DBHelper {
         name TEXT NOT NULL,
         type TEXT NOT NULL,
         content TEXT,
+        caption TEXT,
         version INTEGER DEFAULT 1,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
@@ -144,6 +145,12 @@ class DBHelper {
     if (oldV < 7) {
       try {
         await db.execute('ALTER TABLE projects ADD COLUMN locked INTEGER DEFAULT 0');
+      } catch (_) {}
+    }
+    if (oldV < 8) {
+      // ফাইলের (বিশেষ করে ছবির) নিজস্ব ক্যাপশন।
+      try {
+        await db.execute('ALTER TABLE idea_files ADD COLUMN caption TEXT');
       } catch (_) {}
     }
   }
@@ -442,7 +449,7 @@ class DBHelper {
     return insertFile(IdeaFile(
       ideaId: toIdeaId, projectId: toProjectId,
       name: file.name, type: file.type,
-      content: file.content, createdAt: n, updatedAt: n,
+      content: file.content, caption: file.caption, createdAt: n, updatedAt: n,
     ));
   }
 
