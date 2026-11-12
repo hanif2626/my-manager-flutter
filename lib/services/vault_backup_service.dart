@@ -261,6 +261,9 @@ class VaultBackupService {
   static Future<List<VaultEntry>> _entriesForBackup() async {
     final list = await VaultService.getAll();
     if (list.isEmpty) {
+      if (VaultService.lastSkippedCount == -1) {
+        throw VaultBackupException('ভল্টের ডেটা পড়া যাচ্ছে না — ব্যাকআপ নেওয়ার আগে রিস্টোর করো');
+      }
       throw VaultBackupException('ভল্ট খালি — ব্যাকআপ নেওয়ার কিছু নেই');
     }
     return list;

@@ -38,6 +38,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   String _query = '';
   String _cat = 'login'; // 'login' | 'token' | 'note' | 'card' | 'wifi' | 'all'
   int _changedSinceBackup = 0;
+  int _skippedEntries = 0; // ভল্ট পড়ার সময় কয়টা এন্ট্রি ভাঙা পাওয়া গেছে (-1 = পুরো ভল্ট নষ্ট)
   int _lastBackupMs = 0;
 
   @override
@@ -59,18 +60,22 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
     // kick back out to wherever it was opened from. Coming back in
     // means going through fingerprint/PIN again.
     if (state == AppLifecycleState.paused && mounted && !VaultScreen.suppressAutoLock) {
-      Navigator.of(context).pop();
+      // শুধু একটা pop নয় — ডিটেইল শিট/ফর্ম খোলা থাকলে সেটা বন্ধ হয়ে
+      // নিচের ভল্ট স্ক্রিন (পাসওয়ার্ডসহ) খোলাই থাকত; তাই রুট পর্যন্ত বন্ধ করো।
+      Navigator.of(context).popUntil((r) => r.isFirst);
     }
   }
 
   Future<void> _load() async {
     final list = await VaultService.getAll();
+    final skipped = VaultService.lastSkippedCount;
     list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     final last = VaultBackupService.lastBackupMs();
     final changed = list.where((e) => e.updatedAt > last).length;
     if (mounted) setState(() {
       _entries = list; _loading = false;
       _lastBackupMs = last; _changedSinceBackup = changed;
+      _skippedEntries = skipped;
     });
   }
 
@@ -159,7 +164,15 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
       ),
     );
     if (confirm == true) {
-      await VaultService.delete(entry.id);
+      try {
+        await VaultService.delete(entry.id);
+      } on VaultCorruptException {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('ভল্টের ডেটা পড়া যাচ্ছে না — মুছে ফেলা হয়নি, ব্যাকআপ থেকে রিস্টোর করো')));
+        }
+        return;
+      }
       _load();
     }
   }
@@ -224,6 +237,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
           : Column(children: [
+              _corruptBanner(),
               _backupBanner(),
               Padding(
                 padding: const EdgeInsets.all(14),
@@ -296,6 +310,35 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   }
 
   /// ব্যাকআপ নেই / অনেক দিন আগের / নতুন পরিবর্তন জমেছে → নরম সতর্কবার্তা।
+  /// ভল্টের কিছু এন্ট্রি নষ্ট পাওয়া গেলে লাল সতর্ক-ব্যানার — চাপলে ব্যাকআপ/রিস্টোর খোলে।
+  Widget _corruptBanner() {
+    if (_skippedEntries == 0) return const SizedBox.shrink();
+    final text = _skippedEntries == -1
+        ? 'ভল্টের ডেটা পড়া যাচ্ছে না — সেভ বন্ধ আছে, ব্যাকআপ থেকে রিস্টোর করো'
+        : 'ভল্টের $_skippedEntriesটা এন্ট্রি নষ্ট হয়ে পড়া যায়নি — বাকিগুলো ঠিক আছে, ব্যাকআপ থেকে রিস্টোর করো';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+      child: Material(
+        color: AppTheme.red.withOpacity(0.13),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _openBackup,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(children: [
+              Icon(Icons.warning_amber_rounded, color: AppTheme.red, size: 20),
+              const SizedBox(width: 10),
+              Expanded(child: Text(text,
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5, height: 1.35))),
+              Text('রিস্টোর', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w700, fontSize: 12.5)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _backupBanner() {
     if (_entries.isEmpty) return const SizedBox.shrink();
     final days = _lastBackupMs == 0

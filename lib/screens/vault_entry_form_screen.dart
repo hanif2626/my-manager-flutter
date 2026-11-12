@@ -81,10 +81,19 @@ class _VaultEntryFormScreenState extends State<VaultEntryFormScreen> {
       createdAt: widget.entry?.createdAt ?? n,
       updatedAt: n,
     );
-    if (_isEdit) {
-      await VaultService.update(entry);
-    } else {
-      await VaultService.insert(entry);
+    try {
+      if (_isEdit) {
+        await VaultService.update(entry);
+      } else {
+        await VaultService.insert(entry);
+      }
+    } on VaultCorruptException {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('ভল্টের ডেটা পড়া যাচ্ছে না — সেভ হয়নি, ব্যাকআপ থেকে রিস্টোর করো')));
+      }
+      return;
     }
     if (mounted) Navigator.pop(context);
   }

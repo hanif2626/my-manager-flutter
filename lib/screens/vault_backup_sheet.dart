@@ -73,6 +73,7 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
     final cq = TextEditingController(text: confirm ? VaultBackupService.lastQuestion() : '');
     final ca = TextEditingController();
     bool hide = true;
+    bool useRecovery = false;
     String? error;
     return showDialog<_PwResult>(
       context: context,
@@ -92,8 +93,8 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    'এই পাসওয়ার্ড ভুলে গেলে নিচের রিকভারি প্রশ্নের উত্তর দিয়ে ফিরে পাবে। '
-                    'প্রশ্ন-উত্তর দুটোই ভুলে গেলে ব্যাকআপ আর খোলা যাবে না।',
+                    'এই পাসওয়ার্ড ভুলে গেলে রিকভারি প্রশ্নের উত্তর দিয়ে ফিরে পাওয়া যায় — তবে প্রশ্ন রাখা ঐচ্ছিক। '
+                    'প্রশ্ন না রাখলে শুধু এই পাসওয়ার্ড দিয়েই ব্যাকআপ খুলবে।',
                     style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5, height: 1.4),
                   ),
                 ),
@@ -119,33 +120,47 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
                   decoration: const InputDecoration(labelText: 'আবার লেখো'),
                 ),
                 const SizedBox(height: 16),
-                Text('🔑 পাসওয়ার্ড রিকভারি (পাসওয়ার্ড ভুলে গেলে কাজে লাগবে)',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                Wrap(spacing: 6, runSpacing: 0, children: [
-                  for (final q in _sampleQuestions)
-                    ActionChip(
-                      label: Text(q, style: const TextStyle(fontSize: 11)),
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => setD(() => cq.text = q),
-                    ),
-                ]),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: cq,
-                  style: TextStyle(color: AppTheme.textPrimary),
-                  decoration: const InputDecoration(labelText: 'প্রশ্ন (নিজেরটাও লিখতে পারো)'),
+                CheckboxListTile(
+                  value: useRecovery,
+                  onChanged: (v) => setD(() => useRecovery = v ?? false),
+                  title: Text('রিকভারি প্রশ্ন যোগ করো (ঐচ্ছিক)',
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  dense: true,
                 ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: ca,
-                  style: TextStyle(color: AppTheme.textPrimary),
-                  decoration: const InputDecoration(
-                    labelText: 'উত্তর',
-                    helperText: 'এমন উত্তর দাও যা অন্য কেউ আন্দাজ করতে পারবে না',
-                    helperMaxLines: 2,
+                if (useRecovery) ...[
+                  Text('⚠️ সতর্কতা: এই উত্তর জানলে যে কেউ ব্যাকআপ ফাইল খুলতে পারবে — এমন উত্তর দাও যা কেউ আন্দাজ করতে পারবে না। প্রশ্ন না রাখলে শুধু এই পাসওয়ার্ড দিয়েই ব্যাকআপ খুলবে।',
+                      style: TextStyle(color: AppTheme.red, fontSize: 12, height: 1.4)),
+                  const SizedBox(height: 8),
+                  Text('🔑 পাসওয়ার্ড রিকভারি (পাসওয়ার্ড ভুলে গেলে কাজে লাগবে)',
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 6, runSpacing: 0, children: [
+                    for (final q in _sampleQuestions)
+                      ActionChip(
+                        label: Text(q, style: const TextStyle(fontSize: 11)),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => setD(() => cq.text = q),
+                      ),
+                  ]),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: cq,
+                    style: TextStyle(color: AppTheme.textPrimary),
+                    decoration: const InputDecoration(labelText: 'প্রশ্ন (নিজেরটাও লিখতে পারো)'),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: ca,
+                    style: TextStyle(color: AppTheme.textPrimary),
+                    decoration: const InputDecoration(
+                      labelText: 'উত্তর',
+                      helperText: 'এমন উত্তর দাও যা অন্য কেউ আন্দাজ করতে পারবে না',
+                      helperMaxLines: 2,
+                    ),
+                  ),
+                ],
               ],
               if (!confirm && recoveryQuestion != null) ...[
                 const SizedBox(height: 8),
@@ -181,7 +196,7 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
                   setD(() => error = 'দুইবারের পাসওয়ার্ড মিলছে না');
                   return;
                 }
-                if (confirm) {
+                if (confirm && useRecovery) {
                   if (cq.text.trim().length < 3) {
                     setD(() => error = 'রিকভারি প্রশ্ন লেখো');
                     return;
@@ -195,7 +210,7 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
                     return;
                   }
                 }
-                Navigator.pop(ctx, _PwResult(p, confirm ? cq.text.trim() : null, confirm ? ca.text : null));
+                Navigator.pop(ctx, _PwResult(p, useRecovery ? cq.text.trim() : null, useRecovery ? ca.text : null));
               },
               child: Text('ঠিক আছে', style: TextStyle(color: AppTheme.accent)),
             ),

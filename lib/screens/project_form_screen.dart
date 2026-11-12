@@ -18,6 +18,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   bool _saving = false;
   bool _savedExplicitly = false;
   int? _createdProjectId;
+  Project? _createdProject; // autosave-এ নতুন বানানো প্রজেক্ট (এডিটে copyWith-এর ভিত্তি)
   Timer? _debounce;
 
   @override
@@ -58,23 +59,34 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   /// Writes the current form fields to the database. For a brand-new
   /// project, remembers the created id so a later autosave (e.g. from
   /// dispose) updates that same row instead of inserting a duplicate.
+  /// এডিটে শুধু নাম/বিবরণ/রঙ বদলায় — লক, ট্যাগ, স্ট্যাটাস, ভার্সন,
+  /// সর্ট অর্ডার আগেরটাই থাকে (নতুন Project বানিয়ে লিখলে লক খুলে যেত,
+  /// ভার্সন 1-এ নামত, ট্যাগ মুছে যেত)।
   Future<void> _persist() async {
     if (_name.text.trim().isEmpty) return;
     final n = now();
     final existingId = widget.project?.id ?? _createdProjectId;
     if (existingId == null) {
-      _createdProjectId = await DBHelper.insertProject(Project(
+      final p = Project(
         name: _name.text.trim(),
         description: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
         colorValue: _colorValue, createdAt: n, updatedAt: n,
-      ));
+      );
+      _createdProjectId = await DBHelper.insertProject(p);
+      _createdProject = p.copyWith(id: _createdProjectId);
     } else {
+      final base = widget.project ?? _createdProject;
       await DBHelper.updateProject(Project(
         id: existingId,
         name: _name.text.trim(),
         description: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
         colorValue: _colorValue,
-        createdAt: widget.project?.createdAt ?? n,
+        tags: base?.tags ?? const [],
+        status: base?.status ?? 'active',
+        version: base?.version ?? 1,
+        sortOrder: base?.sortOrder ?? 0,
+        locked: base?.locked ?? 0,
+        createdAt: base?.createdAt ?? n,
         updatedAt: n,
       ));
     }

@@ -12,6 +12,13 @@ import '../models/vault_entry.dart';
 /// vault (tens to low hundreds of entries) this is simpler and
 /// completely adequate — no need for a second database engine just for
 /// this.
+/// ভল্টের ডেটা এমনভাবে নষ্ট যে একটাও এন্ট্রি পড়া যায় না (পুরো blob-টাই
+/// ভাঙা JSON)। এই অবস্থায় সেভ করলে সব মুছে যেত — তাই সেভ-পাথ লেখা বন্ধ
+/// করে এই এক্সেপশন ছোড়ে; UI সেটা ধরে ব্যবহারকারীকে জানায়।
+class VaultCorruptException implements Exception {
+  @override String toString() => 'ভল্টের ডেটা পড়া যাচ্ছে না';
+}
+
 class VaultService {
   static const _key = 'vault_entries_v1';
 
@@ -19,15 +26,69 @@ class VaultService {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
+  /// শেষ পড়ায় কয়টা এন্ট্রি ভাঙা বলে বাদ গেছে; -1 মানে পুরো blob-টাই
+  /// অপঠনযোগ্য। ভল্ট স্ক্রিন এটা দেখে সতর্ক-ব্যানার দেখায়।
+  static int lastSkippedCount = 0;
+
   static Future<List<VaultEntry>> getAll() async {
     try {
-      final raw = await _storage.read(key: _key);
-      if (raw == null || raw.isEmpty) return [];
-      final list = jsonDecode(raw) as List;
-      return list.map((e) => VaultEntry.fromJson(e as Map<String, dynamic>)).toList();
+      return await _readLenient();
     } catch (_) {
+      // পুরো blob-টাই JSON নয় — একটাও এন্ট্রি পড়া যায় না। "খালি" ভেবে
+      // ফেরত দিলে পরের সেভে পুরো ভল্ট মুছে যেত; তাই -1 দিয়ে চিহ্নিত করো।
+      lastSkippedCount = -1;
       return [];
     }
+  }
+
+  /// একটা একটা করে এন্ট্রি পার্স করে — ভাঙা এন্ট্রি বাদ যায়, ভালোগুলো
+  /// থাকে। কখনোই পার্স-এররকে "খালি ভল্ট" ধরে না।
+  static Future<List<VaultEntry>> _readLenient() async {
+    final raw = await _storage.read(key: _key);
+    if (raw == null || raw.isEmpty) { lastSkippedCount = 0; return []; }
+    final list = jsonDecode(raw) as List;
+    final out = <VaultEntry>[];
+    var skipped = 0;
+    for (final e in list) {
+      try {
+        out.add(VaultEntry.fromJson(e as Map<String, dynamic>));
+      } catch (_) { skipped++; }
+    }
+    lastSkippedCount = skipped;
+    return out;
+  }
+
+  /// সেভ-পাথের পড়া: ভাঙা এন্ট্রি বাদ দিয়ে বাকিগুলো নেয়; বাদ পড়া থাকলে
+  /// কাঁচা blob আগে আলাদা চাবিতে (quarantine) রেখে দেয়, যাতে ভাঙা
+  /// এন্ট্রিও উদ্ধার-অযোগ্য না হয়। পুরো blob নষ্ট হলে লেখা বন্ধ করে
+  /// [VaultCorruptException] ছোড়ে — চুপচাপ ওভাররাইট নয়।
+  static Future<List<VaultEntry>> _readForWrite() async {
+    final raw = await _storage.read(key: _key);
+    if (raw == null || raw.isEmpty) { lastSkippedCount = 0; return []; }
+    List decoded;
+    try {
+      decoded = jsonDecode(raw) as List;
+    } catch (_) {
+      lastSkippedCount = -1;
+      throw VaultCorruptException();
+    }
+    final out = <VaultEntry>[];
+    var skipped = 0;
+    for (final e in decoded) {
+      try {
+        out.add(VaultEntry.fromJson(e as Map<String, dynamic>));
+      } catch (_) { skipped++; }
+    }
+    lastSkippedCount = skipped;
+    if (skipped > 0) {
+      try {
+        await _storage.write(
+          key: '$_key-quarantine-${DateTime.now().millisecondsSinceEpoch}',
+          value: raw,
+        );
+      } catch (_) {}
+    }
+    return out;
   }
 
   static Future<void> _saveAll(List<VaultEntry> entries) async {
@@ -57,7 +118,7 @@ class VaultService {
   }
 
   static Future<void> insert(VaultEntry entry) async {
-    final list = await getAll();
+    final list = await _readForWrite();
     list.add(entry);
     await _saveAll(list);
   }
@@ -87,16 +148,24 @@ class VaultService {
   ///  • একই id আছে ও পুরোনো/সমান → বাদ
   ///  • id আলাদা কিন্তু হুবহু একই তথ্য → বাদ (ডুপ্লিকেট)
   ///  • নয়তো নতুন যোগ
-  /// strict read: ভল্ট পার্স না হলে এক্সেপশন ছোঁড়ে, চুপচাপ ওভাররাইট করে না।
-  /// রিটার্ন: [যোগ, আপডেট, বাদ]
+  /// বর্তমান ভল্ট নষ্ট থাকলেও রিস্টোর আটকায় না — ভাঙা এন্ট্রি বাদ যায়,
+  /// পুরো blob নষ্ট হলে সেটা quarantine-এ রেখে খালি থেকে শুরু হয়
+  /// (ব্যাকআপের এন্ট্রিই তখন ভরসা)। রিটার্ন: [যোগ, আপডেট, বাদ]
   static Future<List<int>> mergeMany(List<VaultEntry> incoming) async {
-    final raw = await _storage.read(key: _key);
-    final List<VaultEntry> list;
-    if (raw == null || raw.isEmpty) {
+    List<VaultEntry> list;
+    try {
+      list = await _readForWrite();
+    } on VaultCorruptException {
+      try {
+        final raw = await _storage.read(key: _key);
+        if (raw != null && raw.isNotEmpty) {
+          await _storage.write(
+            key: '$_key-quarantine-${DateTime.now().millisecondsSinceEpoch}',
+            value: raw,
+          );
+        }
+      } catch (_) {}
       list = [];
-    } else {
-      final decoded = jsonDecode(raw) as List;
-      list = decoded.map((e) => VaultEntry.fromJson(e as Map<String, dynamic>)).toList();
     }
     final byId = <String, int>{};
     for (var i = 0; i < list.length; i++) { byId[list[i].id] = i; }
@@ -128,7 +197,7 @@ class VaultService {
   }
 
   static Future<void> update(VaultEntry entry) async {
-    final list = await getAll();
+    final list = await _readForWrite();
     final idx = list.indexWhere((e) => e.id == entry.id);
     if (idx != -1) {
       list[idx] = entry;
@@ -137,7 +206,7 @@ class VaultService {
   }
 
   static Future<void> delete(String id) async {
-    final list = await getAll();
+    final list = await _readForWrite();
     list.removeWhere((e) => e.id == id);
     await _saveAll(list);
   }
