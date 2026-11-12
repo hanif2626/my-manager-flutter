@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_autofill_service/flutter_autofill_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vault_entry.dart';
+import '../services/secure_screen.dart';
 import '../services/vault_service.dart';
 import '../services/auth_service.dart';
 import '../widgets/app_theme.dart';
@@ -70,6 +71,7 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
   @override
   void initState() {
     super.initState();
+    SecureScreen.on(); // পিকারে লগইন তালিকা — স্ক্রিনশট আটকাও
     _init();
   }
 
@@ -78,6 +80,7 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
     _titleCtrl.dispose();
     _usernameCtrl.dispose();
     _searchCtrl.dispose();
+    SecureScreen.off();
     super.dispose();
   }
 
@@ -135,7 +138,11 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
 
   Future<bool> _ensureAuth(SharedPreferences prefs) async {
     final last = prefs.getInt(_lastAuthKey) ?? 0;
-    final fresh = DateTime.now().millisecondsSinceEpoch - last < _authGraceSeconds * 1000;
+    final diff = DateTime.now().millisecondsSinceEpoch - last;
+    // diff ঋণাত্মক মানে সংরক্ষিত সময় ভবিষ্যতে — ঘড়ি পেছানো হয়েছে;
+    // সেক্ষেত্রে grace নয়, আবার যাচাই (নইলে ঘড়ি পিছিয়ে grace
+    // অনির্দিষ্ট বাড়ানো যেত)।
+    final fresh = diff >= 0 && diff < _authGraceSeconds * 1000;
     if (fresh) return true;
     final ok = await AuthService.authenticate(reason: 'Autofill-এর জন্য যাচাই করো');
     if (ok) {

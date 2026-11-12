@@ -172,6 +172,9 @@ class DocsExport {
     } finally {
       // শেয়ার শিট খুলে যাওয়ার পর অ্যাপ পজ হওয়ার সময়টুকু অটো-লক ঠেকানো।
       Future.delayed(const Duration(seconds: 2), () => DocsHomeScreen.suppressAutoLock = false);
+      // ডিক্রিপ্ট করা কপি সাময়িক ফোল্ডারে পড়ে থাকবে না — গ্রহীতা
+      // অ্যাপের সময় দিয়ে ২ মিনিট পর সাফ।
+      Future.delayed(const Duration(minutes: 2), () => cleanShareTemp());
     }
   }
 

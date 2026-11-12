@@ -37,7 +37,8 @@ class DocsRestoreResult {
 /// ফাইল ফরম্যাট: "MMDOCS1" | salt(16) | iter(u32) | nonce(12) | mac(16) | ciphertext
 class DocsBackupService {
   static const _magic = 'MMDOCS1';
-  static const _iterations = 150000;
+  // OWASP সুপারিশ — হেডারে iter থাকে, পুরনো ফাইল আগের মানেই খুলবে।
+  static const _iterations = 600000;
   static const minPasswordLength = 8;
   static const _lastKey = 'docs_last_backup_ms';
 

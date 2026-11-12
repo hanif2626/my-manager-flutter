@@ -2,6 +2,7 @@ package com.hanif.mymanager
 
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs
 import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.engine.FlutterEngine
 
 /**
  * অন্য অ্যাপের (Chrome, Facebook...) লগইন ফর্মের উপর দিয়ে খুলবে এমন আলাদা
@@ -12,6 +13,11 @@ import io.flutter.embedding.android.FlutterFragmentActivity
  * ফিঙ্গারপ্রিন্ট/PIN প্রম্পট আছে।
  */
 class AutofillActivity : FlutterFragmentActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        WindowFlags.register(flutterEngine, this)
+    }
+
     override fun getDartEntrypointFunctionName(): String = "autofillEntryPoint"
 
     override fun getBackgroundMode(): FlutterActivityLaunchConfigs.BackgroundMode =

@@ -107,6 +107,7 @@ class BubbleActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ScreenTimeBridge.register(flutterEngine, applicationContext)
+        WindowFlags.register(flutterEngine, this)
         JobNotifBridge.register(flutterEngine, applicationContext)
         // বাবল নিয়ন্ত্রণ — MainActivity-র মতোই, তবে এখানে Activity
         // থাকায় সেটিংস খোলাটা Activity-সংস্করণেই হয়।

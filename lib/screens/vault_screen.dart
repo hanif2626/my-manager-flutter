@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:otp/otp.dart' as otplib;
 import '../models/vault_entry.dart';
+import '../services/secure_screen.dart';
 import '../services/vault_service.dart';
 import '../services/vault_csv_service.dart';
 import '../services/vault_backup_service.dart';
@@ -45,12 +46,14 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SecureScreen.on(); // ভল্ট খোলা থাকলে স্ক্রিনশট/থাম্বনেইল বন্ধ
     _load();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    SecureScreen.off();
     super.dispose();
   }
 

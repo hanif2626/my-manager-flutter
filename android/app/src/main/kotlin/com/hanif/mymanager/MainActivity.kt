@@ -31,6 +31,7 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ScreenTimeBridge.register(flutterEngine, applicationContext)
+        WindowFlags.register(flutterEngine, this)
         // ভাসমান বাবল (BubbleControl): চালু/বন্ধ, ওভারলে অনুমতি।
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BubbleControl.CHANNEL)
             .setMethodCallHandler { call, result ->

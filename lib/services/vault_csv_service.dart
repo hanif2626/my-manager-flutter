@@ -63,6 +63,11 @@ class VaultCsvService {
     await file.writeAsString(b.toString(), encoding: utf8);
     await Share.shareXFiles([XFile(file.path)],
         text: 'My Manager ভল্ট এক্সপোর্ট — এই ফাইলে পাসওয়ার্ড প্লেইন টেক্সটে আছে, সাবধানে রাখুন');
+    // প্লেইন-টেক্সট পাসওয়ার্ডের ফাইল ফোনে ফেলে রাখা যাবে না — গ্রহীতা
+    // অ্যাপের পড়ে নেওয়ার সময় দিয়ে ২ মিনিট পর মুছে ফেলো।
+    Future.delayed(const Duration(minutes: 2), () async {
+      try { await file.delete(); } catch (_) {}
+    });
   }
 
   /// Minimal RFC 4180 parser: quoted fields, "" as an escaped quote,

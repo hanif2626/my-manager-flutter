@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../family/screens/family_ui.dart';
 import '../../reminder/models/reminder.dart' show bn;
 import '../../services/auth_service.dart';
+import '../../services/secure_screen.dart';
 import '../../widgets/app_theme.dart';
 import '../models/doc_models.dart';
 import '../services/doc_owners.dart';
@@ -37,6 +38,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SecureScreen.on(); // ডকস খোলা থাকলে স্ক্রিনশট/থাম্বনেইল বন্ধ
     DocsService.changes.addListener(_load);
     DocsExport.trayChanges.addListener(_loadTray);
     _owner = DocOwners.selected();
@@ -46,6 +48,7 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    SecureScreen.off();
     DocsService.changes.removeListener(_load);
     DocsExport.trayChanges.removeListener(_loadTray);
     _search.dispose();

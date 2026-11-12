@@ -46,12 +46,14 @@ enum VaultDriveResult { success, notSignedIn, noBackup, failed }
 
 class VaultBackupService {
   static const _format = 'mymanager-vault';
-  static const _iterations = 150000;
+  // OWASP সুপারিশ (PBKDF2-HMAC-SHA256) — প্রতিটি ফাইলে নিজের iter
+  // থাকে, তাই বাড়ালেও পুরনো ফাইল আগের iter দিয়েই খুলবে।
+  static const _iterations = 600000;
   static const driveFileName = 'mymanager_vault.mmvault';
   static const _lastBackupKey = 'vault_last_backup_ms';
   static const minPasswordLength = 8;
   static const minAnswerLength = 3;
-  static const _hintIterations = 200000;
+  static const _hintIterations = 600000;
   static const _lastQuestionKey = 'vault_recovery_question';
 
   /// শেষবার দেওয়া রিকভারি প্রশ্ন (উত্তর কোথাও সেভ হয় না) — পরের ব্যাকআপে আগে থেকে বসানোর জন্য।
