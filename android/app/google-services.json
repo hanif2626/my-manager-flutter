@@ -14,14 +14,6 @@
       },
       "oauth_client": [
         {
-          "client_id": "758590031325-ijgmgqeplvbshdgqeko62q8d7teubeht.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.drivesync.app",
-            "certificate_hash": "697f97202d6402bcb6f6abf783bb11f823f6b6fa"
-          }
-        },
-        {
           "client_id": "758590031325-l4d6ncqhr9836b4f49n28pkf18v2sb3g.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -50,6 +42,14 @@
         }
       },
       "oauth_client": [
+        {
+          "client_id": "758590031325-ijgmgqeplvbshdgqeko62q8d7teubeht.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.hanif.mymanager",
+            "certificate_hash": "fd46c9831e8eb5763a75b68fffa5d924d8972a4a"
+          }
+        },
         {
           "client_id": "758590031325-l4d6ncqhr9836b4f49n28pkf18v2sb3g.apps.googleusercontent.com",
           "client_type": 3
