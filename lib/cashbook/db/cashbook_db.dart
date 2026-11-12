@@ -255,8 +255,13 @@ class CashbookDB {
           '${e.accountId}|${e.category}|${e.note}|${e.type}' == sig);
       if (!alreadyThisMonth) {
         final n = DateTime.now().millisecondsSinceEpoch;
-        await insertEntry(src.copyWith(date: todayIso(), updatedAt: n));
-        created++;
+        try {
+          await insertEntry(src.copyWith(
+              date: todayIso(), createdAt: n, updatedAt: n, clearId: true));
+          created++;
+        } catch (_) {
+          // একটা recurring ব্যর্থ হলেও খাতা খোলা আটকাবে না
+        }
       }
     }
     return created;
@@ -313,23 +318,32 @@ class CashbookDB {
       if (e.paidIn(mk)) return;
       final acc = await currentMonthAccount();
       final ms = DateTime.now().millisecondsSinceEpoch;
-      final entryId = await insertEntry(CashbookEntry(
-        accountId: acc.id!,
-        type: 'out',
-        amount: e.amount,
-        category: e.category,
-        note: 'আবশ্যিক খরচ: ${e.title}',
-        date: todayIso(),
-        createdAt: ms,
-        updatedAt: ms,
-      ));
-      await d.update('essentials', {'paid_month': mk, 'entry_id': entryId}, where: 'id=?', whereArgs: [id]);
+      // এন্ট্রি + টিক একই ট্রানজ্যাকশনে — মাঝপথে ব্যর্থ হলে কোনোটাই
+      // লেখা হয় না (আগে এন্ট্রি লেখা হয়ে টিক বসত না; আবার চাপলে
+      // দ্বিতীয় খরচ-এন্ট্রি হয়ে যেত)।
+      await d.transaction((txn) async {
+        final entryId = await txn.insert('entries', CashbookEntry(
+          accountId: acc.id!,
+          type: 'out',
+          amount: e.amount,
+          category: e.category,
+          note: 'আবশ্যিক খরচ: ${e.title}',
+          date: todayIso(),
+          createdAt: ms,
+          updatedAt: ms,
+        ).toMap());
+        await txn.update('essentials', {'paid_month': mk, 'entry_id': entryId}, where: 'id=?', whereArgs: [id]);
+      });
+      CashbookWidgetService.refresh();
     } else {
       if (!e.paidIn(mk)) return;
-      if (e.entryId != null) {
-        await deleteEntry(e.entryId!);
-      }
-      await d.update('essentials', {'paid_month': null, 'entry_id': null}, where: 'id=?', whereArgs: [id]);
+      await d.transaction((txn) async {
+        if (e.entryId != null) {
+          await txn.delete('entries', where: 'id=?', whereArgs: [e.entryId]);
+        }
+        await txn.update('essentials', {'paid_month': null, 'entry_id': null}, where: 'id=?', whereArgs: [id]);
+      });
+      CashbookWidgetService.refresh();
     }
     SpendingGuard.changes.value++;
   }
@@ -400,47 +414,63 @@ class CashbookDB {
   ///  • পাওনা আদায় (lend)   → জমা
   ///  • দেনা পরিশোধ (borrow) → খরচ
   /// টিক তুলে নিলে ওই এন্ট্রিও মুছে যায়; আবার টিক দিলে নতুন করে (কখনো দুবার নয়)।
-  static Future<void> setDebtCleared(int id, bool cleared) async {
-    final d = await db;
-    await d.update('debts', {'cleared': cleared ? 1 : 0}, where: 'id=?', whereArgs: [id]);
-    try {
-      await _syncDebtLedger(id, cleared);
-    } catch (_) {
-      // খাতার এন্ট্রি ব্যর্থ হলেও দেনার টিক আটকাবে না
-    }
-  }
-
-  static Future<void> _syncDebtLedger(int id, bool cleared) async {
+  /// টিক + খাতার এন্ট্রি একই DB ট্রানজ্যাকশনে — মাঝপথে ব্যর্থ হলে
+  /// কোনোটাই বসে না (আগে টিক আগে বসত, এন্ট্রির ত্রুটি চাপা পড়ত —
+  /// "টিক আছে, টাকা নেই" অবস্থা হতো)। settle-ম্যাপ SharedPreferences-এ
+  /// থাকে বলে সেটা DB কমিটের পরেই বদলায়। ফেরত: সফল হলে true।
+  static Future<bool> setDebtCleared(int id, bool cleared) async {
     final d = await db;
     final map = _settleMap();
     final key = '$id';
-    if (cleared) {
-      if (map.containsKey(key)) return;
+    // ট্রানজ্যাকশনের ভেতরে আলাদা db.query ডাকা যায় না (sqflite আটকে
+    // যায়) — যা লাগবে আগেই জোগাড় করো।
+    CashbookEntry? newEntry;
+    if (cleared && !map.containsKey(key)) {
       final rows = await d.query('debts', where: 'id=?', whereArgs: [id]);
-      if (rows.isEmpty) return;
-      final debt = CashbookDebt.fromMap(rows.first);
-      final acc = await currentMonthAccount();
-      final ms = DateTime.now().millisecondsSinceEpoch;
-      final isLend = debt.type == 'lend';
-      final entryId = await insertEntry(CashbookEntry(
-        accountId: acc.id!,
-        type: isLend ? 'in' : 'out',
-        amount: debt.amount,
-        category: 'other',
-        note: isLend ? 'পাওনা আদায়: ${debt.name}' : 'দেনা পরিশোধ: ${debt.name}',
-        date: todayIso(),
-        createdAt: ms,
-        updatedAt: ms,
-      ));
-      map[key] = entryId;
-      await _saveSettleMap(map);
-    } else {
-      final eid = map.remove(key);
-      if (eid != null) {
-        await deleteEntry((eid as num).toInt());
-        await _saveSettleMap(map);
+      if (rows.isNotEmpty) {
+        final debt = CashbookDebt.fromMap(rows.first);
+        final acc = await currentMonthAccount();
+        final ms = DateTime.now().millisecondsSinceEpoch;
+        final isLend = debt.type == 'lend';
+        newEntry = CashbookEntry(
+          accountId: acc.id!,
+          type: isLend ? 'in' : 'out',
+          amount: debt.amount,
+          category: 'other',
+          note: isLend ? 'পাওনা আদায়: ${debt.name}' : 'দেনা পরিশোধ: ${debt.name}',
+          date: todayIso(),
+          createdAt: ms,
+          updatedAt: ms,
+        );
       }
     }
+    final removeEntryId = !cleared ? (map[key] as num?)?.toInt() : null;
+    int? insertedId;
+    try {
+      await d.transaction((txn) async {
+        await txn.update('debts', {'cleared': cleared ? 1 : 0}, where: 'id=?', whereArgs: [id]);
+        if (newEntry != null) {
+          insertedId = await txn.insert('entries', newEntry.toMap());
+        }
+        if (removeEntryId != null) {
+          await txn.delete('entries', where: 'id=?', whereArgs: [removeEntryId]);
+        }
+      });
+    } catch (_) {
+      return false;
+    }
+    if (insertedId != null) {
+      map[key] = insertedId;
+      await _saveSettleMap(map);
+      CashbookWidgetService.refresh();
+      SpendingGuard.changes.value++;
+    } else if (removeEntryId != null) {
+      map.remove(key);
+      await _saveSettleMap(map);
+      CashbookWidgetService.refresh();
+      SpendingGuard.changes.value++;
+    }
+    return true;
   }
 
   static Future<void> deleteDebt(int id) async {
@@ -475,29 +505,22 @@ class CashbookDB {
   static Future<void> importAll(Map<String, dynamic> data) async {
     final d = await db;
     await d.transaction((txn) async {
-      await txn.delete('entries');
-      await txn.delete('accounts');
-      await txn.delete('budgets');
-      await txn.delete('debts');
-      for (final row in (data['accounts'] as List? ?? [])) {
-        await txn.insert('accounts', Map<String, dynamic>.from(row));
-      }
-      for (final row in (data['entries'] as List? ?? [])) {
-        await txn.insert('entries', Map<String, dynamic>.from(row));
-      }
-      for (final row in (data['budgets'] as List? ?? [])) {
-        await txn.insert('budgets', Map<String, dynamic>.from(row));
-      }
-      for (final row in (data['debts'] as List? ?? [])) {
-        await txn.insert('debts', Map<String, dynamic>.from(row));
-      }
-      // পুরনো ব্যাকআপে এই চাবি নেই — তখন বর্তমান আবশ্যিক খরচ মুছবে না।
-      if (data.containsKey('essentials')) {
-        await txn.delete('essentials');
-        for (final row in (data['essentials'] as List? ?? [])) {
-          await txn.insert('essentials', Map<String, dynamic>.from(row));
+      // চাবি থাকলেই শুধু সেই টেবিল বদলাও — ব্যাকআপে কোনো টেবিলের চাবি
+      // না থাকলে (পুরনো/আংশিক ফাইল) বর্তমান ডেটা মুছবে না। আগে
+      // essentials ছাড়া বাকি টেবিল নিঃশর্তে মোছা হতো বলে চাবি-হারা
+      // ব্যাকআপে দেনা/বাজেট চিরতরে যেত।
+      Future<void> swap(String table) async {
+        if (!data.containsKey(table)) return;
+        await txn.delete(table);
+        for (final row in (data[table] as List? ?? [])) {
+          await txn.insert(table, Map<String, dynamic>.from(row));
         }
       }
+      await swap('accounts');
+      await swap('entries');
+      await swap('budgets');
+      await swap('debts');
+      await swap('essentials');
     });
   }
 

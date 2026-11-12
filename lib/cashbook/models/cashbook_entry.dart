@@ -66,10 +66,12 @@ class CashbookEntry {
     String? date,
     String? voucherImage,
     bool? recurring,
+    int? createdAt,
     int? updatedAt,
+    bool clearId = false, // recurring কপিতে পুরনো id রাখলে UNIQUE constraint ক্র্যাশ হয়
   }) =>
       CashbookEntry(
-        id: id,
+        id: clearId ? null : id,
         accountId: accountId ?? this.accountId,
         type: type ?? this.type,
         amount: amount ?? this.amount,
@@ -78,7 +80,7 @@ class CashbookEntry {
         date: date ?? this.date,
         voucherImage: voucherImage ?? this.voucherImage,
         recurring: recurring ?? this.recurring,
-        createdAt: createdAt,
+        createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
       );
 

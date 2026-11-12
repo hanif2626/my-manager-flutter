@@ -9,6 +9,7 @@ import '../models/idea_file.dart';
 import '../models/project.dart';
 import '../models/idea.dart';
 import '../widgets/app_theme.dart';
+import '../widgets/safe_base64_image.dart';
 import 'file_editor_screen.dart';
 import 'image_viewer_screen.dart';
 import 'copy_move_screen.dart';
@@ -244,9 +245,9 @@ class _FileGridScreenState extends State<FileGridScreen> {
               child: ClipRRect(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
                 child: f.isImage && f.content != null
-                    ? Image.memory(base64Decode(f.content!), fit: BoxFit.cover,
+                    ? SafeBase64Image(data: f.content!, fit: BoxFit.cover,
                         width: double.infinity,
-                        errorBuilder: (_, __, ___) => _extIcon(f, color))
+                        fallback: _extIcon(f, color))
                     : _extIcon(f, color),
               ),
             ),
@@ -289,8 +290,8 @@ class _FileGridScreenState extends State<FileGridScreen> {
                   borderRadius: BorderRadius.circular(8)),
               clipBehavior: Clip.antiAlias,
               child: f.isImage && f.content != null
-                  ? Image.memory(base64Decode(f.content!), fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _extIcon(f, color))
+                  ? SafeBase64Image(data: f.content!, fit: BoxFit.cover,
+                      fallback: _extIcon(f, color))
                   : _extIcon(f, color),
             ),
             const SizedBox(width: 12),

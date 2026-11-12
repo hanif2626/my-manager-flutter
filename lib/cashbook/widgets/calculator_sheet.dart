@@ -99,7 +99,10 @@ class _CalculatorSheetState extends State<CalculatorSheet> {
     if (expr.isEmpty) return null;
     final safe = expr.replaceAll('×', '*').replaceAll('÷', '/').replaceAll('−', '-');
     try {
-      return _evalMath(safe);
+      final r = _evalMath(safe);
+      // ৫÷০ = Infinity, ০÷০ = NaN — এগুলো ফলাফল নয়; null ফেরালে পরিমাণে
+      // বসবে না (আগে Infinity এন্ট্রি শিটে গিয়ে roundToDouble-এ ক্র্যাশ করত)।
+      return (r == null || !r.isFinite) ? null : r;
     } catch (_) {
       return null;
     }
@@ -159,6 +162,7 @@ class _CalculatorSheetState extends State<CalculatorSheet> {
   }
 
   String _fmtNum(double v) {
+    if (!v.isFinite) return '';
     final rounded = (v * 100).round() / 100;
     return rounded == rounded.roundToDouble()
         ? rounded.toInt().toString()

@@ -17,6 +17,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   int _colorValue = AppTheme.projectColors[0].value;
   bool _saving = false;
   bool _savedExplicitly = false;
+  bool _persisting = false; // একই সময়ে দুটো _persist চললে নতুন প্রজেক্ট ডুপ্লিকেট হতো
   int? _createdProjectId;
   Project? _createdProject; // autosave-এ নতুন বানানো প্রজেক্ট (এডিটে copyWith-এর ভিত্তি)
   Timer? _debounce;
@@ -63,7 +64,17 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   /// সর্ট অর্ডার আগেরটাই থাকে (নতুন Project বানিয়ে লিখলে লক খুলে যেত,
   /// ভার্সন 1-এ নামত, ট্যাগ মুছে যেত)।
   Future<void> _persist() async {
+    if (_persisting) return;
     if (_name.text.trim().isEmpty) return;
+    _persisting = true;
+    try {
+      await _persistInner();
+    } finally {
+      _persisting = false;
+    }
+  }
+
+  Future<void> _persistInner() async {
     final n = now();
     final existingId = widget.project?.id ?? _createdProjectId;
     if (existingId == null) {
@@ -99,8 +110,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       return;
     }
     setState(() => _saving = true);
-    await _persist();
+    // dispose()-এর autosave যেন আরেকটা _persist না ডাকে (ডুপ্লিকেট রেস) —
+    // তাই await-এর আগেই পতাকা বসাও।
     _savedExplicitly = true;
+    await _persist();
     if (mounted) Navigator.pop(context);
   }
 

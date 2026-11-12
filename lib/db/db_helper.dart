@@ -93,7 +93,11 @@ class DBHelper {
 
   static Future<void> _onUpgrade(Database db, int oldV, int newV) async {
     if (oldV < 2) {
-      await db.execute('ALTER TABLE projects ADD COLUMN version INTEGER DEFAULT 1');
+      // বাকি ধাপগুলোর মতো এটাও try/catch-এ — ALTER ব্যর্থ হলে (কলাম আগে
+      // থেকেই আছে) DB খোলাই বন্ধ হয়ে যেত, পুরো অ্যাপ অচল হতো।
+      try {
+        await db.execute('ALTER TABLE projects ADD COLUMN version INTEGER DEFAULT 1');
+      } catch (_) {}
       await db.execute('''
         CREATE TABLE IF NOT EXISTS project_versions(
           id INTEGER PRIMARY KEY AUTOINCREMENT,

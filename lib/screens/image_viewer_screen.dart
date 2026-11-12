@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:convert';
 import '../models/idea_file.dart';
 import '../widgets/app_theme.dart';
+import '../widgets/safe_base64_image.dart';
 
 class ImageViewerScreen extends StatelessWidget {
   final IdeaFile file;
@@ -39,7 +40,9 @@ class ImageViewerScreen extends StatelessWidget {
           ? InteractiveViewer(
               minScale: 0.5, maxScale: 5.0,
               child: Center(
-                child: Image.memory(base64Decode(file.content!), fit: BoxFit.contain),
+                child: SafeBase64Image(data: file.content!, fit: BoxFit.contain,
+                    fallback: const Center(
+                        child: Text('ছবি লোড হয়নি', style: TextStyle(color: Colors.white)))),
               ),
             )
           : const Center(child: Text('No image', style: TextStyle(color: Colors.white))),

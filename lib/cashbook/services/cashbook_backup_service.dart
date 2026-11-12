@@ -67,12 +67,16 @@ class CashbookBackupService {
     if (json == null || json.isEmpty) return false;
     try {
       final data = jsonDecode(json) as Map<String, dynamic>;
-      final backupEntries = (data['entries'] as List?)?.length ?? 0;
       final localJson = await _json();
       final local = jsonDecode(localJson) as Map<String, dynamic>;
       final localEntries = (local['entries'] as List?)?.length ?? 0;
-      if (backupEntries == 0 && localEntries > 0) {
-        drive.lastError = 'এই ব্যাকআপে কোনো এন্ট্রি নেই, কিন্তু অ্যাপে এখন ${localEntries}টি এন্ট্রি আছে — ডেটা বাঁচাতে ফেরানো হয়নি';
+      // গার্ড শুধু এন্ট্রি গুনলে হয় না — এন্ট্রি-শূন্য কিন্তু দেনা/আবশ্যিক
+      // ভরা ব্যাকআপ বৈধ; আবার পুরোপুরি খালি ব্যাকআপে বর্তমান ডেটা মোছা যাবে না।
+      int totalOf(Map<String, dynamic> m) =>
+          ['entries', 'debts', 'essentials', 'accounts']
+              .fold(0, (s, k) => s + ((m[k] as List?)?.length ?? 0));
+      if (totalOf(data) == 0 && totalOf(local) > 0) {
+        drive.lastError = 'এই ব্যাকআপ পুরোপুরি খালি (এন্ট্রি/দেনা/আবশ্যিক কিছুই নেই), কিন্তু অ্যাপে এখন ডেটা আছে — ডেটা বাঁচাতে ফেরানো হয়নি';
         return false;
       }
       if (localEntries > 0 || (local['accounts'] as List?)?.isNotEmpty == true) {

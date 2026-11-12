@@ -61,11 +61,19 @@ class CashbookLegacyImportService {
       for (final row in txRows) {
         final cashIn = (row['cash_in'] as num?) ?? 0;
         final cashOut = (row['cash_out'] as num?) ?? 0;
-        final isIn = cashIn > 0;
-        final amount = isIn ? cashIn : cashOut;
-        if (amount == 0) continue; // nothing actually moved in this row
+        if (cashIn == 0 && cashOut == 0) continue; // nothing actually moved in this row
 
-        final epochMs = row['date'] as int;
+        // তারিখ int ছাড়াও TEXT/REAL হতে পারে — cast ব্যর্থ হলে আগে পুরো
+        // ইমপোর্ট বাতিল হয়ে যেত; এখন শুধু ওই সারি বাদ যায়।
+        final rawDate = row['date'];
+        final int? epochMs = rawDate is int
+            ? rawDate
+            : rawDate is num
+                ? rawDate.toInt()
+                : rawDate is String
+                    ? int.tryParse(rawDate.trim())
+                    : null;
+        if (epochMs == null) continue;
         // These timestamps are UTC epoch millis; Bangladesh sits at a
         // fixed UTC+6 with no daylight saving, so a flat +6h is exact —
         // no timezone package needed for this one-time conversion.
@@ -79,13 +87,19 @@ class CashbookLegacyImportService {
         final accountName = row['accounts'] as String?;
         if (accountName == null) continue; // can't place this entry anywhere
 
-        entries.add({
-          'accountName': accountName,
-          'type': isIn ? 'in' : 'out',
-          'amount': amount.toDouble(),
-          'date': dateStr,
-          'note': (rawNote != null && rawNote.isNotEmpty) ? rawNote : 'পুরনো এন্ট্রি',
-        });
+        // একই সারিতে জমা ও খরচ দুটোই থাকলে দুটো আলাদা এন্ট্রি — আগে
+        // শুধু জমাটা নেওয়া হতো, খরচটা চিরতরে হারিয়ে যেত।
+        void addPart(String type, num amt) {
+          entries.add({
+            'accountName': accountName,
+            'type': type,
+            'amount': amt.toDouble(),
+            'date': dateStr,
+            'note': (rawNote != null && rawNote.isNotEmpty) ? rawNote : 'পুরনো এন্ট্রি',
+          });
+        }
+        if (cashIn > 0) addPart('in', cashIn);
+        if (cashOut > 0) addPart('out', cashOut);
       }
 
       return CashbookDB.importLegacy(accountNames: accountNames, entries: entries);

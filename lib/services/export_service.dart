@@ -120,6 +120,7 @@ class ExportService {
   }
 
   static Future<ImportResult> importProject(String zipPath) async {
+    int? projectId;
     try {
       final bytes = await File(zipPath).readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
@@ -132,7 +133,7 @@ class ExportService {
       final metaJson = jsonDecode(utf8.decode(metaFile.content as List<int>));
       final n = DateTime.now().millisecondsSinceEpoch;
 
-      final projectId = await DBHelper.insertProject(Project(
+      projectId = await DBHelper.insertProject(Project(
         name: '${metaJson['name']} (Imported)',
         description: metaJson['description'],
         colorValue: metaJson['color'] ?? 0xFF6366F1,
@@ -217,14 +218,24 @@ class ExportService {
       }
       return ImportResult.ok(ideaCount, fileCount);
     } catch (e) {
+      // মাঝপথে ভাঙলে অর্ধেক-তৈরি প্রজেক্ট রেখে যেয়ো না — যা তৈরি
+      // হয়েছিল মুছে দাও, যাতে "ব্যর্থ" দেখে আবার import করলে
+      // ডুপ্লিকেট না হয়।
+      if (projectId != null) {
+        try { await DBHelper.deleteProject(projectId); } catch (_) {}
+      }
       return ImportResult.err(e.toString());
     }
   }
 
-  static String _safeName(String name) =>
-      name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_')
-          .replaceAll(RegExp(r'\s+'), '_')
-          .substring(0, name.length.clamp(0, 50));
+  static String _safeName(String name) {
+    // দৈর্ঘ্য মাপতে হবে বদলানো স্ট্রিংয়ের — মূল নামের নয় (\s+ → _ হলে
+    // দৈর্ঘ্য কমে যায়; মূল নামের দৈর্ঘ্যে substring করলে RangeError)।
+    final s = name
+        .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_')
+        .replaceAll(RegExp(r'\s+'), '_');
+    return s.substring(0, s.length.clamp(0, 50));
+  }
 }
 
 class ImportResult {

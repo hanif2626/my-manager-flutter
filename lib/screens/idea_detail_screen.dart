@@ -15,6 +15,7 @@ import '../models/idea.dart';
 import '../models/project.dart';
 import '../models/idea_file.dart';
 import '../widgets/app_theme.dart';
+import '../widgets/safe_base64_image.dart';
 import 'file_editor_screen.dart';
 import 'image_viewer_screen.dart';
 import 'pdf_viewer_screen.dart';
@@ -778,9 +779,10 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
             },
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.memory(base64Decode(file.content!),
+              child: SafeBase64Image(
+                  data: file.content!,
                   width: double.infinity, fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => Container(
+                  fallback: Container(
                     padding: const EdgeInsets.all(20),
                     alignment: Alignment.center,
                     child: Text('ছবি লোড হয়নি',
@@ -818,8 +820,8 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
 
     Widget thumbChild;
     if (file.isImage && file.content != null) {
-      thumbChild = Image.memory(base64Decode(file.content!), fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Center(child: Text(extLabel,
+      thumbChild = SafeBase64Image(data: file.content!, fit: BoxFit.cover,
+          fallback: Center(child: Text(extLabel,
               style: TextStyle(color: extColor, fontSize: 11, fontWeight: FontWeight.w800))));
     } else if (file.isAudio) {
       thumbChild = Center(child: Icon(

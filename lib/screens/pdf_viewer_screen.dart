@@ -31,7 +31,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   Future<void> _preparePdf() async {
     try {
       if (widget.file.content == null) {
-        setState(() { _error = 'ফাইলে কোনো content নেই'; _loading = false; });
+        if (mounted) setState(() { _error = 'ফাইলে কোনো content নেই'; _loading = false; });
         return;
       }
       final dir = await getTemporaryDirectory();
@@ -39,9 +39,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       final f = File(path);
       final bytes = base64Decode(widget.file.content!);
       await f.writeAsBytes(bytes);
-      setState(() { _pdfPath = path; _loading = false; });
+      if (mounted) setState(() { _pdfPath = path; _loading = false; });
     } catch (e) {
-      setState(() { _error = 'PDF লোড করা যায়নি: $e'; _loading = false; });
+      if (mounted) setState(() { _error = 'PDF লোড করা যায়নি: $e'; _loading = false; });
     }
   }
 
@@ -107,10 +107,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   pageSnap: true,
                   fitPolicy: FitPolicy.BOTH,
                   backgroundColor: AppTheme.bg,
-                  onRender: (pages) => setState(() => _totalPages = pages ?? 0),
-                  onPageChanged: (page, _) => setState(() => _currentPage = page ?? 0),
-                  onViewCreated: (ctrl) => setState(() => _controller = ctrl),
-                  onError: (e) => setState(() => _error = e.toString()),
+                  onRender: (pages) { if (mounted) setState(() => _totalPages = pages ?? 0); },
+                  onPageChanged: (page, _) { if (mounted) setState(() => _currentPage = page ?? 0); },
+                  onViewCreated: (ctrl) { if (mounted) setState(() => _controller = ctrl); },
+                  onError: (e) { if (mounted) setState(() => _error = e.toString()); },
                 ),
     );
   }

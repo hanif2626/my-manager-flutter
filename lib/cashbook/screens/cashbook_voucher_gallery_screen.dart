@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/cashbook_entry.dart';
 import '../services/cashbook_service.dart';
 import '../../widgets/app_theme.dart';
+import '../../widgets/safe_base64_image.dart';
 
 /// Every entry that has a voucher photo attached, as a tappable grid —
 /// useful once there are enough entries that scrolling the main list to
@@ -37,7 +38,9 @@ class CashbookVoucherGalleryScreen extends StatelessWidget {
                   onTap: () => _openViewer(context, e),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: Image.memory(base64Decode(e.voucherImage!), fit: BoxFit.cover),
+                    child: SafeBase64Image(data: e.voucherImage!, fit: BoxFit.cover,
+                        fallback: Container(color: AppTheme.bg3,
+                            child: Icon(Icons.broken_image_outlined, color: AppTheme.textMuted))),
                   ),
                 );
               },
@@ -54,7 +57,9 @@ class CashbookVoucherGalleryScreen extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: Image.memory(base64Decode(e.voucherImage!), fit: BoxFit.contain),
+            child: SafeBase64Image(data: e.voucherImage!, fit: BoxFit.contain,
+                fallback: Container(padding: const EdgeInsets.all(24), color: AppTheme.bg3,
+                    child: Text('ছবি লোড হয়নি', style: TextStyle(color: AppTheme.textMuted)))),
           ),
           const SizedBox(height: 10),
           Container(

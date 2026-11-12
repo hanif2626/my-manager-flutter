@@ -84,8 +84,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _importing = false);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.red));
     }
   }

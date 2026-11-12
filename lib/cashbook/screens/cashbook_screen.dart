@@ -1327,9 +1327,14 @@ class _CashbookScreenState extends State<CashbookScreen> {
           GestureDetector(
             onTap: () async {
               final nowCleared = !d.cleared;
-              await CashbookDB.setDebtCleared(d.id!, nowCleared);
+              final okSettle = await CashbookDB.setDebtCleared(d.id!, nowCleared);
               await _afterMutation();
               if (!mounted) return;
+              if (!okSettle) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('হিসাব মেলাতে সমস্যা হয়েছে — আবার চেষ্টা করো')));
+                return;
+              }
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text(nowCleared
                     ? (d.type == 'lend'

@@ -10,6 +10,7 @@ import '../models/cashbook_entry.dart';
 import '../models/cashbook_category.dart';
 import '../services/cashbook_service.dart';
 import '../../widgets/app_theme.dart';
+import '../../widgets/safe_base64_image.dart';
 import '../widgets/bangla_digit_input_formatter.dart';
 import '../widgets/calculator_sheet.dart';
 
@@ -67,7 +68,8 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
     _voucherBase64 = e?.voucherImage;
   }
 
-  String _trimZero(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+  String _trimZero(double v) =>
+      !v.isFinite ? '' : (v == v.roundToDouble() ? v.toInt().toString() : v.toString());
 
   @override
   void dispose() {
@@ -359,7 +361,8 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
                     onPressed: _attachVoucher,
                     icon: _voucherBase64 != null
                         ? ClipRRect(borderRadius: BorderRadius.circular(6),
-                            child: Image.memory(base64Decode(_voucherBase64!), width: 22, height: 22, fit: BoxFit.cover))
+                            child: SafeBase64Image(data: _voucherBase64!, width: 22, height: 22, fit: BoxFit.cover,
+                                fallback: Icon(Icons.camera_alt_outlined, size: 19, color: AppTheme.textSecondary)))
                         : Icon(Icons.camera_alt_outlined, size: 19, color: AppTheme.textSecondary),
                   ),
                   IconButton(
