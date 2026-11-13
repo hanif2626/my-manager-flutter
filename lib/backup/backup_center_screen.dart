@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../cashbook/db/cashbook_db.dart';
 import '../cashbook/services/cashbook_backup_service.dart';
 import '../docs/db/docs_db.dart';
 import '../docs/screens/docs_backup_sheet.dart';
@@ -10,6 +11,7 @@ import '../reminder/services/reminder_backup_service.dart';
 import '../screens/vault_backup_sheet.dart';
 import '../services/drive_service.dart';
 import '../services/safety_net.dart';
+import '../services/auto_backup.dart';
 import '../services/settings_service.dart';
 import '../services/vault_backup_service.dart';
 import '../widgets/app_theme.dart';
@@ -51,9 +53,9 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
         _Mod('main', '📁', 'প্রজেক্ট, আইডিয়া ও ফাইল',
             'প্রজেক্ট, টাস্ক, সংযুক্ত ফাইল, ভার্সন', 'mymanager_backup.json',
             auto: SettingsService.getBool('auto_backup_enabled', defaultValue: false),
-            replacesOnRestore: true),
+            ),
         const _Mod('cashbook', '💰', 'ক্যাশবুক', 'খাতা, এন্ট্রি, আবশ্যিক খরচ, দেনা-পাওনা (প্রতি পরিবর্তনে নিজে)',
-            'cashbook_backup.json', auto: true, replacesOnRestore: true),
+            'cashbook_backup.json', auto: true),
         const _Mod('jobs', '🧑‍💼', 'চাকরি হাব', 'সার্কুলার, ডকুমেন্ট চেকলিস্ট, টার্গেট (নিজে)',
             JobBackupService.fileName, auto: true),
         const _Mod('family', '👨‍👩‍👧', 'পরিবার', 'সদস্য, তারিখ, বিল, জরুরি তথ্য (নিজে)',
@@ -261,13 +263,13 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
         case 'main':
           final r = await DriveService.instance.restoreFromDrive(version: version);
           r == DriveBackupResult.success
-              ? _setMsg(m.id, '✅ ফিরে এসেছে — অ্যাপ বন্ধ করে আবার খোলো')
+              ? _setMsg(m.id, _mainRestoreMsg())
               : _setMsg(m.id, _driveErr(r), error: true);
           break;
         case 'cashbook':
           final r = await CashbookBackupService.restoreFromDrive(version: version);
           r
-              ? _setMsg(m.id, '✅ ক্যাশবুক ফিরে এসেছে')
+              ? _setMsg(m.id, _cashRestoreMsg())
               : _setMsg(m.id, CashbookBackupService.failReason ?? 'Drive-এ ক্যাশবুকের ব্যাকআপ পাওয়া যায়নি বা সাইন-ইন নেই', error: true);
           break;
         case 'jobs':
@@ -422,6 +424,10 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
           children: [
             _accountCard(signedIn, drive.userEmail),
             const SizedBox(height: 12),
+            if (signedIn && SettingsService.getBool('auto_backup_enabled', defaultValue: false)) ...[
+              _autoStatusLine(),
+              const SizedBox(height: 12),
+            ],
             if (signedIn) _summary(needs),
             if (signedIn) const SizedBox(height: 12),
             if (signedIn)
@@ -455,6 +461,29 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
         ),
       ),
     );
+  }
+
+  String _mainRestoreMsg() {
+    final c = DriveService.instance.lastRestoreCounts;
+    if (c == null) return '✅ মার্জ হয়েছে — কিছু মোছা হয়নি';
+    return '✅ মার্জ হয়েছে — নতুন যোগ ${bn(c.added)}টি, আপডেট ${bn(c.updated)}টি, আগের মতো ${bn(c.kept)}টি; কিছু মোছা হয়নি';
+  }
+
+  String _cashRestoreMsg() {
+    final c = CashbookDB.lastImportCounts;
+    if (c == null) return '✅ ক্যাশবুক মার্জ হয়েছে — কিছু মোছা হয়নি';
+    return '✅ ক্যাশবুক মার্জ হয়েছে — নতুন যোগ ${bn(c.added)}টি, আপডেট ${bn(c.updated)}টি; কিছু মোছা হয়নি';
+  }
+
+  Widget _autoStatusLine() {
+    final ms = AutoBackup.lastMs;
+    final text = ms == 0
+        ? '🤖 অটো-ব্যাকআপ চালু — এখনো প্রথম রান হয়নি'
+        : '🤖 শেষ অটো-ব্যাকআপ: ${_ago(DateTime.fromMillisecondsSinceEpoch(ms))} — ${AutoBackup.lastDetail}';
+    return Text(text,
+        style: TextStyle(
+            color: AutoBackup.lastOk || ms == 0 ? AppTheme.textMuted : AppTheme.red,
+            fontSize: 12));
   }
 
   Widget _accountCard(bool signedIn, String? email) {

@@ -13,6 +13,7 @@ import 'services/vault_service.dart';
 import 'services/notification_service.dart';
 import 'services/settings_service.dart';
 import 'services/drive_service.dart';
+import 'services/auto_backup.dart';
 import 'cashbook/services/cashbook_notification_service.dart';
 import 'cashbook/services/cashbook_widget_service.dart';
 import 'cashbook/services/spending_guard.dart';
@@ -155,6 +156,8 @@ void main() async {
   runApp(const MyManagerApp());
   // অ্যাপ খুললেও: আজকের রাতের রিপোর্টের সময় পেরিয়ে থাকলে ও বাকি থাকলে এখনই করে দেয়।
   RadarRunner.runIfDue().then((_) {}, onError: (_) {});
+  // অটো-ব্যাকআপের catch-up: শেষ রান ১২ ঘণ্টার বেশি পুরনো হলে এখনই।
+  AutoBackup.runIfDue().then((_) {}, onError: (_) {});
   // Refresh the home screen widget on every cold start too, in case
   // something changed while the app wasn't running.
   WidgetService.update();
@@ -204,10 +207,7 @@ void callbackDispatcher() {
       if (!SettingsService.getBool('auto_backup_enabled', defaultValue: false)) {
         return true;
       }
-      final signedIn = await DriveService.instance.signInSilently();
-      if (signedIn) {
-        await DriveService.instance.backupDatabase();
-      }
+      await AutoBackup.runAll();
     } catch (_) {
       // Swallow errors — a failed background backup shouldn't crash
       // anything or retry-loop aggressively. It'll just try again on

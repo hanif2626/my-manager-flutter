@@ -502,26 +502,67 @@ class CashbookDB {
     };
   }
 
+  /// শেষ মার্জ-ইমপোর্টের হিসাব (নতুন যোগ, আপডেট, আগের মতো) — UI-তে দেখাতে।
+  static ({int added, int updated, int kept})? lastImportCounts;
+
+  /// মার্জ-ইমপোর্ট: কোনো টেবিল মোছে না। ব্যাকআপে চাবি না থাকা টেবিল
+  /// আগের মতোই অক্ষত থাকে; চাবি থাকলে id দিয়ে মিলিয়ে নতুন সারি যোগ
+  /// হয়, entries-এ updated_at নতুন হলে আপডেট হয়, বাকি সব লোকালই
+  /// থাকে। budgets-এর চাবি category (UNIQUE) — ওটা দিয়েই মেলে।
+  /// তাই পুরনো ব্যাকআপ ফেরালে পরের লোকাল এন্ট্রি/দেনা কখনো হারায় না।
   static Future<void> importAll(Map<String, dynamic> data) async {
     final d = await db;
+    var added = 0, updated = 0, kept = 0;
     await d.transaction((txn) async {
-      // চাবি থাকলেই শুধু সেই টেবিল বদলাও — ব্যাকআপে কোনো টেবিলের চাবি
-      // না থাকলে (পুরনো/আংশিক ফাইল) বর্তমান ডেটা মুছবে না। আগে
-      // essentials ছাড়া বাকি টেবিল নিঃশর্তে মোছা হতো বলে চাবি-হারা
-      // ব্যাকআপে দেনা/বাজেট চিরতরে যেত।
-      Future<void> swap(String table) async {
+      Future<void> mergeById(String table, {bool byTime = false}) async {
         if (!data.containsKey(table)) return;
-        await txn.delete(table);
-        for (final row in (data[table] as List? ?? [])) {
-          await txn.insert(table, Map<String, dynamic>.from(row));
+        final existing = await txn.query(table,
+            columns: byTime ? ['id', 'updated_at'] : ['id']);
+        final local = <int, int>{
+          for (final r in existing)
+            r['id'] as int: byTime ? (r['updated_at'] as int? ?? 0) : 0,
+        };
+        for (final raw in (data[table] as List? ?? [])) {
+          final row = Map<String, dynamic>.from(raw as Map);
+          final id = row['id'] as int?;
+          if (id == null) continue;
+          final lu = local[id];
+          if (lu == null) {
+            await txn.insert(table, row);
+            local[id] = byTime ? (row['updated_at'] as int? ?? 0) : 0;
+            added++;
+          } else if (byTime && (row['updated_at'] as int? ?? 0) > lu) {
+            await txn.update(table, row, where: 'id = ?', whereArgs: [id]);
+            local[id] = row['updated_at'] as int;
+            updated++;
+          } else {
+            kept++;
+          }
         }
       }
-      await swap('accounts');
-      await swap('entries');
-      await swap('budgets');
-      await swap('debts');
-      await swap('essentials');
+
+      await mergeById('accounts');
+      await mergeById('entries', byTime: true);
+      if (data.containsKey('budgets')) {
+        final existing = await txn.query('budgets');
+        final have = existing.map((r) => r['category'] as String).toSet();
+        for (final raw in (data['budgets'] as List? ?? [])) {
+          final row = Map<String, dynamic>.from(raw as Map)..remove('id');
+          final cat = row['category'] as String?;
+          if (cat == null) continue;
+          if (have.contains(cat)) {
+            kept++;
+          } else {
+            await txn.insert('budgets', row);
+            have.add(cat);
+            added++;
+          }
+        }
+      }
+      await mergeById('debts');
+      await mergeById('essentials');
     });
+    lastImportCounts = (added: added, updated: updated, kept: kept);
   }
 
   // ── LEGACY IMPORT (e.g. from another cash-book app's .db export) ────

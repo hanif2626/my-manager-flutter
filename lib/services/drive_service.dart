@@ -45,6 +45,9 @@ class DriveService {
   /// can show something more useful than a generic "failed" message.
   String? lastError;
 
+  /// শেষ মার্জ-রিস্টোরের হিসাব (নতুন যোগ, আপডেট, আগের মতো) — UI-তে দেখাতে।
+  ({int added, int updated, int kept})? lastRestoreCounts;
+
   final _googleSignIn = GoogleSignIn(scopes: [drive.DriveApi.driveFileScope]);
   drive.DriveApi? _driveApi;
   GoogleSignInAccount? _account;
@@ -182,8 +185,10 @@ class DriveService {
     }
   }
 
-  /// প্রজেক্ট/আইডিয়ার ডেটা [jsonData] দিয়ে বদলায়। সুরক্ষা: (১) ব্যাকআপ ফাঁকা আর অ্যাপে ডেটা থাকলে বদলায় না;
-  /// (২) বদলানোর আগে বর্তমান ডেটার কপি ফোনে রাখে।
+  /// প্রজেক্ট/আইডিয়ার ডেটা [jsonData] থেকে মার্জ করে — বর্তমান কোনো
+  /// সারি মোছে না: নতুন id যোগ হয়, একই id-তে updated_at নতুনটা জেতে।
+  /// সুরক্ষা: (১) ব্যাকআপ ফাঁকা আর অ্যাপে ডেটা থাকলে ফেরায় না;
+  /// (২) ফেরানোর আগে বর্তমান ডেটার কপি ফোনে রাখে (SafetyNet)।
   Future<DriveBackupResult> restoreFromText(String jsonData) async {
     final backupN = SafetyNet.itemCount(jsonData) ?? 0;
     final localN = await _localItemCount();
@@ -194,7 +199,7 @@ class DriveService {
     try {
       if (localN > 0) await SafetyNet.snapshot('main', await _exportAllDataAsJson());
     } catch (_) {}
-    await _importFromJson(jsonData);
+    lastRestoreCounts = await _importFromJson(jsonData);
     return DriveBackupResult.success;
   }
 
@@ -202,7 +207,7 @@ class DriveService {
     try {
       final d = await DBHelper.db;
       var n = 0;
-      for (final t in ['projects', 'ideas', 'idea_files', 'project_versions']) {
+      for (final t in ['projects', 'ideas', 'idea_files', 'project_versions', 'checklist_items']) {
         n += Sqflite.firstIntValue(await d.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
       }
       return n;
@@ -217,6 +222,7 @@ class DriveService {
     final projects = await d.query('projects');
     final ideas = await d.query('ideas');
     final versions = await d.query('project_versions');
+    final checklist = await d.query('checklist_items');
 
     // idea_files one row at a time, not `d.query('idea_files')` in one
     // go — some attachments (photos, PDFs) are large enough on their own
@@ -237,34 +243,56 @@ class DriveService {
       'ideas': ideas,
       'idea_files': files,
       'project_versions': versions,
+      'checklist_items': checklist,
     });
   }
 
-  Future<void> _importFromJson(String jsonData) async {
+  /// মার্জ-ইমপোর্ট: কোনো টেবিলের কোনো সারি মোছে না। id দিয়ে মিলিয়ে —
+  /// লোকালে না থাকলে যোগ, থাকলে updated_at যার নতুন সে জেতে
+  /// (project_versions-এ updated_at নেই; স্ন্যাপশট অপরিবর্তনীয় বলে
+  /// শুধু নতুনগুলো যোগ হয়)। তাই পুরনো ব্যাকআপ ফেরালেও ব্যাকআপের পরে
+  /// তৈরি লোকাল প্রজেক্ট/আইডিয়া/ফাইল/চেকলিস্ট কখনো হারায় না।
+  Future<({int added, int updated, int kept})> _importFromJson(String jsonData) async {
     final data = jsonDecode(jsonData) as Map<String, dynamic>;
     final d = await DBHelper.db;
+    var added = 0, updated = 0, kept = 0;
 
     await d.transaction((txn) async {
-      await txn.delete('idea_files');
-      await txn.delete('project_versions');
-      await txn.delete('ideas');
-      await txn.delete('projects');
-
-      for (final row in (data['projects'] as List)) {
-        await txn.insert('projects', Map<String, dynamic>.from(row));
-      }
-      for (final row in (data['ideas'] as List)) {
-        await txn.insert('ideas', Map<String, dynamic>.from(row));
-      }
-      for (final row in (data['idea_files'] as List)) {
-        await txn.insert('idea_files', Map<String, dynamic>.from(row));
-      }
-      if (data['project_versions'] != null) {
-        for (final row in (data['project_versions'] as List)) {
-          await txn.insert('project_versions', Map<String, dynamic>.from(row));
+      Future<void> mergeTable(String table, {bool byTime = true}) async {
+        final rows = data[table] as List?;
+        if (rows == null) return;
+        final existing = await txn.query(table,
+            columns: byTime ? ['id', 'updated_at'] : ['id']);
+        final local = <int, int>{
+          for (final r in existing)
+            r['id'] as int: byTime ? (r['updated_at'] as int? ?? 0) : 0,
+        };
+        for (final raw in rows) {
+          final row = Map<String, dynamic>.from(raw as Map);
+          final id = row['id'] as int?;
+          if (id == null) continue;
+          final lu = local[id];
+          if (lu == null) {
+            await txn.insert(table, row);
+            local[id] = byTime ? (row['updated_at'] as int? ?? 0) : 0;
+            added++;
+          } else if (byTime && (row['updated_at'] as int? ?? 0) > lu) {
+            await txn.update(table, row, where: 'id = ?', whereArgs: [id]);
+            local[id] = row['updated_at'] as int;
+            updated++;
+          } else {
+            kept++;
+          }
         }
       }
+
+      await mergeTable('projects');
+      await mergeTable('ideas');
+      await mergeTable('idea_files');
+      await mergeTable('project_versions', byTime: false);
+      await mergeTable('checklist_items');
     });
+    return (added: added, updated: updated, kept: kept);
   }
 
   // ── GENERIC NAMED-JSON BACKUP (used by the Cashbook module, which
