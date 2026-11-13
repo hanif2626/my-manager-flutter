@@ -38,6 +38,7 @@ dependencies:
   home_widget: ^0.5.0
   flutter_secure_storage: ^9.2.4
   otp: ^3.1.4
+  mobile_scanner: 5.1.1
   flutter_autofill_service: ^0.21.0
   pdf: ^3.10.8
   permission_handler: ^11.3.1

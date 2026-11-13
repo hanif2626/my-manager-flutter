@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:otp/otp.dart' as otplib;
 import '../models/vault_entry.dart';
 import '../services/secure_screen.dart';
 import '../services/vault_service.dart';
@@ -10,6 +9,8 @@ import '../services/vault_backup_service.dart';
 import 'vault_backup_sheet.dart';
 import '../widgets/app_theme.dart';
 import 'vault_entry_form_screen.dart';
+import 'authenticator_screen.dart';
+import '../widgets/totp_code.dart';
 
 const _typeIcons = {
   'login': Icons.lock_outline,
@@ -219,6 +220,12 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
         title: const Text('পাসওয়ার্ড ভল্ট'),
         actions: [
           IconButton(
+            icon: Icon(Icons.qr_code_2_outlined, color: AppTheme.textSecondary),
+            tooltip: 'Authenticator',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const AuthenticatorScreen())),
+          ),
+          IconButton(
             icon: Icon(Icons.security, color: AppTheme.textSecondary),
             tooltip: 'নিরাপত্তা যাচাই',
             onPressed: () => _showSecurityCheck(),
@@ -291,7 +298,8 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
                                 style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                               ),
                               trailing: e.totpSecret != null && e.totpSecret!.isNotEmpty
-                                  ? _MiniTotp(secret: e.totpSecret!)
+                                  ? TotpCode(secret: e.totpSecret!,
+                                      onCopy: (code) => _copy('2FA কোড', code))
                                   : null,
                             ),
                           );
@@ -510,41 +518,6 @@ class _StrengthProxy {
   }
 }
 
-/// Small live-updating 6-digit TOTP code shown on the list row, for
-/// logins that have 2FA set up.
-class _MiniTotp extends StatefulWidget {
-  final String secret;
-  const _MiniTotp({required this.secret});
-  @override State<_MiniTotp> createState() => _MiniTotpState();
-}
-
-class _MiniTotpState extends State<_MiniTotp> {
-  Timer? _timer;
-  String _code = '------';
-
-  @override
-  void initState() {
-    super.initState();
-    _tick();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
-  }
-
-  @override
-  void dispose() { _timer?.cancel(); super.dispose(); }
-
-  void _tick() {
-    try {
-      final code = otplib.OTP.generateTOTPCodeString(
-          widget.secret, DateTime.now().millisecondsSinceEpoch,
-          length: 6, interval: 30, algorithm: otplib.Algorithm.SHA1, isGoogle: true);
-      if (mounted) setState(() => _code = code);
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) => Text(_code, style: TextStyle(
-      color: AppTheme.accent, fontWeight: FontWeight.w700, fontSize: 13, letterSpacing: 1));
-}
 
 /// Bottom sheet shown when tapping an entry — reveal fields, copy, edit,
 /// delete.
@@ -592,7 +565,8 @@ class _VaultDetailSheetState extends State<_VaultDetailSheet> {
           const SizedBox(height: 8),
           Text('2FA কোড', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
           const SizedBox(height: 4),
-          _MiniTotp(secret: e.totpSecret!),
+          TotpCode(secret: e.totpSecret!, large: true,
+              onCopy: (code) => widget.onCopy('2FA কোড', code)),
         ],
       ]),
     );

@@ -3,6 +3,7 @@ import '../models/vault_entry.dart';
 import '../services/vault_service.dart';
 import '../services/password_generator.dart';
 import '../widgets/app_theme.dart';
+import 'qr_scan_screen.dart';
 
 class VaultEntryFormScreen extends StatefulWidget {
   final VaultEntry? entry;
@@ -68,6 +69,15 @@ class _VaultEntryFormScreenState extends State<VaultEntryFormScreen> {
       return;
     }
     setState(() => _saving = true);
+    // otpauth:// লিংক পেস্ট হলে আসল secret-টা বের করো; স্পেস বাদ দাও
+    // (Google key স্পেসসহ দেখায়, কিন্তু Base32-তে স্পেসের মানে নেই)।
+    var totp = _totpSecret.text.trim();
+    if (totp.startsWith('otpauth://')) {
+      try {
+        totp = (Uri.parse(totp).queryParameters['secret'] ?? totp).trim();
+      } catch (_) {}
+    }
+    totp = totp.replaceAll(' ', '');
     final n = DateTime.now().millisecondsSinceEpoch;
     final entry = VaultEntry(
       id: widget.entry?.id ?? 'v_$n',
@@ -77,7 +87,7 @@ class _VaultEntryFormScreenState extends State<VaultEntryFormScreen> {
       secret: _secret.text,
       url: _url.text.trim().isEmpty ? null : _url.text.trim(),
       notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
-      totpSecret: _totpSecret.text.trim().isEmpty ? null : _totpSecret.text.trim(),
+      totpSecret: totp.isEmpty ? null : totp,
       createdAt: widget.entry?.createdAt ?? n,
       updatedAt: n,
     );
@@ -103,6 +113,52 @@ class _VaultEntryFormScreenState extends State<VaultEntryFormScreen> {
       _secret.text = PasswordGenerator.generate(length: 18);
       _obscure = false;
     });
+  }
+
+  /// QR স্ক্যানের মান বসায়: otpauth:// লিংক হলে secret বের করে, শিরোনাম/
+  /// ইউজারনেম ফাঁকা থাকলে লেবেল থেকে সাজেস্ট করে; শুধু secret স্ক্যান
+  /// হলেও সরাসরি বসে।
+  void _applyScanned(String raw) {
+    var secret = raw.trim();
+    String? issuer;
+    String? account;
+    if (raw.startsWith('otpauth://')) {
+      try {
+        final uri = Uri.parse(raw);
+        secret = (uri.queryParameters['secret'] ?? '').trim();
+        issuer = uri.queryParameters['issuer'];
+        final label = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
+        if (label.contains(':')) {
+          final parts = label.split(':');
+          issuer ??= parts.first.trim();
+          account = parts.sublist(1).join(':').trim();
+        } else if (label.isNotEmpty) {
+          account = label.trim();
+        }
+      } catch (_) {}
+    }
+    if (secret.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('QR থেকে TOTP secret পাওয়া যায়নি')));
+      return;
+    }
+    setState(() {
+      _totpSecret.text = secret.replaceAll(' ', '');
+      if (_title.text.trim().isEmpty && (issuer ?? account) != null) {
+        _title.text = (issuer ?? account)!;
+      }
+      if (_username.text.trim().isEmpty && account != null && account.isNotEmpty) {
+        _username.text = account;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('TOTP secret বসেছে — সেভ করলেই কোড চালু হবে')));
+  }
+
+  Future<void> _scanQr() async {
+    final raw = await Navigator.push<String>(context,
+        MaterialPageRoute(builder: (_) => const QrScanScreen()));
+    if (raw != null && mounted) _applyScanned(raw);
   }
 
   @override
@@ -219,6 +275,12 @@ class _VaultEntryFormScreenState extends State<VaultEntryFormScreen> {
             _label('2FA / TOTP secret (ঐচ্ছিক)'),
             const SizedBox(height: 6),
             _field(_totpSecret, 'Base32 secret — QR কোডের বদলে ম্যানুয়ালি দিলে'),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _scanQr,
+              icon: const Icon(Icons.qr_code_scanner, size: 18),
+              label: const Text('QR কোড স্ক্যান করো'),
+            ),
             const SizedBox(height: 16),
           ],
 
