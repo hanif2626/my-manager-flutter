@@ -42,6 +42,8 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
   late String _type;
   final _amountCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
+  final _amountFocus = FocusNode();
+  final _noteFocus = FocusNode();
   late DateTime _date;
   late String _category;
   bool _recurring = false;
@@ -75,6 +77,8 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
   void dispose() {
     _amountCtrl.dispose();
     _noteCtrl.dispose();
+    _amountFocus.dispose();
+    _noteFocus.dispose();
     super.dispose();
   }
 
@@ -83,6 +87,27 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
     if (result != null) {
       setState(() => _amountCtrl.text = _trimZero(result));
     }
+  }
+
+  /// Smart input routing (শুধু নতুন এন্ট্রি): শিট খুললেই ফোকাস নোট
+  /// বাক্সে থাকে। প্রথম অক্ষর digit (1234/১২৩৪) হলে উদ্দেশ্য টাকা —
+  /// অক্ষরটা পরিমাণের ঘরে চলে যায়, ফোকাসও সেখানে (numeric কিবোর্ড
+  /// আসে)। Letter (abcd/কখগঘ) হলে নোটেই লেখা চলতে থাকে।
+  void _routeFirstChar(String value) {
+    if (_isEdit || value.length != 1 || _amountCtrl.text.isNotEmpty) return;
+    const bn = '০১২৩৪৫৬৭৮৯';
+    final ch = value[0];
+    final bnIdx = bn.indexOf(ch);
+    String? digit;
+    if (bnIdx != -1) {
+      digit = bnIdx.toString();
+    } else if (RegExp(r'[0-9.]').hasMatch(ch)) {
+      digit = ch;
+    }
+    if (digit == null) return;
+    _amountCtrl.text = digit;
+    _noteCtrl.clear();
+    _amountFocus.requestFocus();
   }
 
   Future<void> _loadRecents() async {
@@ -290,7 +315,8 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
               Expanded(
                 child: TextField(
                   controller: _amountCtrl,
-                  autofocus: !_isEdit,
+                  focusNode: _amountFocus,
+                  autofocus: _isEdit,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [BanglaDigitInputFormatter()],
                   style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
@@ -347,6 +373,9 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
             // same idea as the reference app's camera icon inside its Notes field
             TextField(
               controller: _noteCtrl,
+              focusNode: _noteFocus,
+              autofocus: !_isEdit,
+              onChanged: _routeFirstChar,
               decoration: InputDecoration(
                 // ফাঁকা বক্স যেন টেক্সট-বক্স বলে বোঝা যায়
                 hintText: 'Note (ঐচ্ছিক)',

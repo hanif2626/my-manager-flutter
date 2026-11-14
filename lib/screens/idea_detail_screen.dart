@@ -170,6 +170,32 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
           )),
+          const SizedBox(height: 8),
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(
+            onPressed: () async {
+              final text = noteCtrl.text.trim();
+              if (text.isNotEmpty) {
+                final n = now();
+                final firstLine = text.split('\n').first.trim();
+                final name = firstLine.length > 28
+                    ? firstLine.substring(0, 28)
+                    : (firstLine.isEmpty ? 'নোট' : firstLine);
+                await DBHelper.insertFile(IdeaFile(
+                  ideaId: _idea.id!, projectId: widget.project.id!,
+                  name: name, type: 'text',
+                  content: text, createdAt: n, updatedAt: n,
+                ));
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+              _addImageQuick();
+            },
+            icon: Icon(Icons.photo_library_outlined, size: 16, color: AppTheme.green),
+            label: Text('নোট রেখে সরাসরি ছবি যোগ করো', style: TextStyle(
+                color: AppTheme.textPrimary, fontWeight: FontWeight.w700, fontSize: 14)),
+            style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+          )),
           const SizedBox(height: 20),
         ]),
       ),
@@ -246,6 +272,31 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
         ideaId: _idea.id!, projectId: widget.project.id!,
         name: name, type: 'image', content: b64,
         caption: caption.trim().isEmpty ? null : caption.trim(),
+        createdAt: n, updatedAt: n,
+      ));
+      _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.red));
+    }
+  }
+
+  // ── QUICK ADD IMAGE (সরাসরি গ্যালারি, ক্যাপশন-ডায়ালগ ছাড়া) ──
+  // হেডারের 'ছবি' বোতাম ও নোট-শিট থেকে: এক ট্যাপে গ্যালারি খোলে,
+  // ছবি বাছলেই সেভ। ক্যাপশন পরে এন্ট্রির ⋯ মেনু থেকে যোগ/বদল হয়।
+  Future<void> _addImageQuick() async {
+    try {
+      final picked = await BubblePicker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final b64 = base64Encode(bytes);
+      final ext = picked.name.split('.').last.toLowerCase();
+      final name = picked.name.toLowerCase().contains('icon')
+          ? picked.name : 'icon.$ext';
+      final n = now();
+      await DBHelper.insertFile(IdeaFile(
+        ideaId: _idea.id!, projectId: widget.project.id!,
+        name: name, type: 'image', content: b64,
         createdAt: n, updatedAt: n,
       ));
       _load();
@@ -667,6 +718,22 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                             fontWeight: FontWeight.w600)),
                     const Spacer(),
                     GestureDetector(
+                      onTap: _addImageQuick,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(color: AppTheme.bg3,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppTheme.border)),
+                        child: Row(children: [
+                          Icon(Icons.photo_library_outlined, size: 14, color: AppTheme.green),
+                          const SizedBox(width: 4),
+                          Text('ছবি', style: TextStyle(color: AppTheme.textPrimary,
+                              fontSize: 12, fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
                       onTap: _showAddOptions,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -772,29 +839,33 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
         ]),
         const SizedBox(height: 8),
         if (file.isImage && file.content != null)
-          GestureDetector(
-            onTap: () async {
-              await Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => ImageViewerScreen(file: file)));
-            },
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SafeBase64Image(
-                  data: file.content!,
-                  width: double.infinity, fit: BoxFit.contain,
-                  fallback: Container(
-                    padding: const EdgeInsets.all(20),
-                    alignment: Alignment.center,
-                    child: Text('ছবি লোড হয়নি',
-                        style: TextStyle(color: AppTheme.textMuted)),
-                  )),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            GestureDetector(
+              onTap: () async {
+                await Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ImageViewerScreen(file: file)));
+              },
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SafeBase64Image(
+                    data: file.content!,
+                    width: 105, height: 140, fit: BoxFit.cover,
+                    fallback: Container(
+                      width: 105, height: 140,
+                      alignment: Alignment.center,
+                      child: Text('ছবি লোড হয়নি',
+                          style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                    )),
+              ),
             ),
-          ),
-        if (file.isImage && file.caption != null && file.caption!.trim().isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Text(file.caption!, style: TextStyle(
-              color: AppTheme.textPrimary, fontSize: 16, height: 1.55)),
-        ],
+            if (file.caption != null && file.caption!.trim().isNotEmpty) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(file.caption!, style: TextStyle(
+                    color: AppTheme.textPrimary, fontSize: 16, height: 1.55)),
+              ),
+            ],
+          ]),
         if (!file.isImage)
           GestureDetector(
             onTap: () async {
