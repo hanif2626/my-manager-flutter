@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../models/vault_entry.dart';
 import '../services/vault_service.dart';
 import '../services/password_generator.dart';
+import '../services/bubble_picker.dart';
 import '../widgets/app_theme.dart';
 import 'qr_scan_screen.dart';
 
@@ -161,6 +164,39 @@ class _VaultEntryFormScreenState extends State<VaultEntryFormScreen> {
     if (raw != null && mounted) _applyScanned(raw);
   }
 
+  /// গ্যালারির ছবি (যেমন QR-এর স্ক্রিনশট) থেকে QR পড়া — একই ফোনে
+  /// সেটআপের সময় ক্যামেরা স্ক্যান অসম্ভব, এটাই তার সহজ পথ।
+  Future<void> _scanQrFromGallery() async {
+    try {
+      final picked = await BubblePicker.pickImage(
+          source: ImageSource.gallery, imageQuality: 100);
+      if (picked == null || !mounted) return;
+      final capture =
+          await MobileScannerController().analyzeImage(picked.path);
+      String? raw;
+      if (capture != null) {
+        for (final b in capture.barcodes) {
+          if (b.rawValue != null && b.rawValue!.isNotEmpty) {
+            raw = b.rawValue;
+            break;
+          }
+        }
+      }
+      if (!mounted) return;
+      if (raw == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('এই ছবিতে কোনো QR কোড পাওয়া যায়নি — QR-সহ স্ক্রিনশটটা বাছো')));
+        return;
+      }
+      _applyScanned(raw);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('ছবি পড়া যায়নি: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final (strengthLabel, strengthScore) = PasswordGenerator.strength(_secret.text);
@@ -280,6 +316,12 @@ class _VaultEntryFormScreenState extends State<VaultEntryFormScreen> {
               onPressed: _scanQr,
               icon: const Icon(Icons.qr_code_scanner, size: 18),
               label: const Text('QR কোড স্ক্যান করো'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _scanQrFromGallery,
+              icon: const Icon(Icons.photo_library_outlined, size: 18),
+              label: const Text('গ্যালারি থেকে QR পড়ো (স্ক্রিনশট)'),
             ),
             const SizedBox(height: 16),
           ],
