@@ -12,6 +12,7 @@ import '../services/auth_service.dart';
 import 'project_detail_screen.dart';
 import 'project_form_screen.dart';
 import 'backup_screen.dart';
+import '../backup/backup_center_screen.dart';
 
 /// Dashboard tab — shows the project list. Search and Settings now live
 /// in the bottom navigation, so this AppBar only keeps what's needed at
@@ -261,6 +262,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         style: OutlinedButton.styleFrom(
             side: const BorderSide(color: AppTheme.accent),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10)),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: () async {
+          await Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const BackupCenterScreen()));
+          _load();
+        },
+        icon: const Icon(Icons.cloud_download_outlined, color: AppTheme.accent),
+        label: const Text('আগের Backup থাকলে Drive থেকে Restore করো',
+            style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600)),
+        style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: AppTheme.accent),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10)),
+      ),
+      const SizedBox(height: 8),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Text('নতুন ফোন বা নতুন ইনস্টল? Backup Center থেকে সব মডিউল এক জায়গায় ফিরিয়ে আনো',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5)),
       ),
     ]),
   );

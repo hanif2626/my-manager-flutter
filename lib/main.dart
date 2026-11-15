@@ -14,6 +14,7 @@ import 'services/notification_service.dart';
 import 'services/settings_service.dart';
 import 'services/drive_service.dart';
 import 'services/auto_backup.dart';
+import 'services/vault_backup_reminder.dart';
 import 'cashbook/services/cashbook_notification_service.dart';
 import 'cashbook/services/cashbook_widget_service.dart';
 import 'cashbook/services/spending_guard.dart';
@@ -158,6 +159,8 @@ void main() async {
   RadarRunner.runIfDue().then((_) {}, onError: (_) {});
   // অটো-ব্যাকআপের catch-up: শেষ রান ১২ ঘণ্টার বেশি পুরনো হলে এখনই।
   AutoBackup.runIfDue().then((_) {}, onError: (_) {});
+  // ভল্টে backup-বাকি বদল থাকলে নোটিফিকেশন বারের স্থায়ী সতর্কতা হালনাগাদ।
+  VaultBackupReminder.sync().then((_) {}, onError: (_) {});
   // Refresh the home screen widget on every cold start too, in case
   // something changed while the app wasn't running.
   WidgetService.update();

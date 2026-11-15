@@ -14,6 +14,7 @@ import '../services/safety_net.dart';
 import '../services/auto_backup.dart';
 import '../services/settings_service.dart';
 import '../services/vault_backup_service.dart';
+import '../services/vault_backup_reminder.dart';
 import '../widgets/app_theme.dart';
 
 class _Mod {
@@ -196,6 +197,7 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
     if (m.id == 'vault') {
       await showVaultBackupSheet(context);
       await _loadTimes();
+      await VaultBackupReminder.sync();
       return;
     }
     if (m.id == 'docs') {
@@ -231,6 +233,7 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
     if (m.id == 'vault') {
       await showVaultBackupSheet(context);
       await _loadTimes();
+      await VaultBackupReminder.sync();
       return;
     }
     final ok = await showDialog<bool>(

@@ -6,6 +6,7 @@ import '../services/secure_screen.dart';
 import '../services/vault_service.dart';
 import '../services/vault_csv_service.dart';
 import '../services/vault_backup_service.dart';
+import '../services/vault_backup_reminder.dart';
 import 'vault_backup_sheet.dart';
 import '../widgets/app_theme.dart';
 import 'vault_entry_form_screen.dart';
@@ -81,6 +82,9 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
       _lastBackupMs = last; _changedSinceBackup = changed;
       _skippedEntries = skipped;
     });
+    // নোটিফিকেশন বারের স্থায়ী সতর্কতাও হালনাগাদ রাখো (backup বাকি
+    // থাকলে বসে, backup হয়ে গেলে উঠে যায়)।
+    VaultBackupReminder.sync().catchError((_) {});
   }
 
   static const _catOrder = ['login', 'token', 'note', 'card', 'wifi'];
@@ -355,12 +359,14 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
     final days = _lastBackupMs == 0
         ? 9999
         : DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(_lastBackupMs)).inDays;
-    final needs = _lastBackupMs == 0 || days >= 30 || (_changedSinceBackup > 0 && days >= 3);
+    // বদল হলেই সাথে সাথে সতর্কতা (আগে ৩ দিন অপেক্ষা করত) — ব্যবহারকারীর
+    // সিদ্ধান্ত: reminder সাথে সাথে, backup এক ট্যাপে।
+    final needs = _lastBackupMs == 0 || days >= 30 || _changedSinceBackup > 0;
     if (!needs) return const SizedBox.shrink();
     final text = _lastBackupMs == 0
         ? 'ভল্টের কোনো ব্যাকআপ নেই — ফোন হারালে বা রিসেট হলে সব পাসওয়ার্ড চলে যাবে'
         : (_changedSinceBackup > 0
-            ? 'শেষ ব্যাকআপের পর $_changedSinceBackupটা এন্ট্রি নতুন/বদলেছে ($days দিন আগে)'
+            ? 'শেষ ব্যাকআপের পর $_changedSinceBackupটা এন্ট্রি নতুন/বদলেছে — backup না নিলে অ্যাপ মুছে গেলে ওগুলো হারাবে'
             : 'শেষ ব্যাকআপ $days দিন আগে');
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
