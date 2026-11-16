@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../widgets/app_theme.dart';
 import '../db/cashbook_db.dart';
 import '../services/cashbook_backup_service.dart';
+import '../services/cashbook_notification_service.dart';
 import '../services/spending_guard.dart';
 import '../services/cashbook_widget_service.dart';
 import 'cashbook_entry_sheet.dart';
@@ -70,6 +71,8 @@ class _LauncherState extends State<_Launcher> {
       if (saved == true) {
         // কিস্তি/আবশ্যিক খরচের ৩ বেলার সতর্কতা নতুন ব্যালেন্সে আবার বসাই (এই আলাদা engine-এ লিসেনার নেই)।
         try { await SpendingGuard.rearmSlots(); } catch (_) {}
+        // সন্ধ্যার আবশ্যিক সতর্কতাও হালনাগাদ করো — এন্ট্রি হয়ে গেলে লেগে-থাকা সতর্কতা উঠে যাবে।
+        try { await CashbookNotificationService.refresh(); } catch (_) {}
         await CashbookBackupService.backupSilently().timeout(const Duration(seconds: 20), onTimeout: () {});
       }
     } catch (_) {}

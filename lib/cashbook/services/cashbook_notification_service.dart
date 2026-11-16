@@ -28,6 +28,7 @@ class CashbookNotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
   static const _channelId = 'cashbook_reminder_channel';
+  static const _eveningOngoingId = 7830; // সন্ধ্যার লেগে-থাকা আবশ্যিক সতর্কতা
 
   // সেটিংসে ব্যবহারকারীর দেওয়া সময় থেকে শুরু করে, প্রতি ৩০ মিনিটে, রাত ১১:৩০
   // পর্যন্ত (বা শুরুর সময় তার পরে হলে অন্তত একটা স্লট) — প্রতিটা স্লট নিজের
@@ -36,7 +37,7 @@ class CashbookNotificationService {
     final startH = CashbookService.reminderHour.clamp(0, 23);
     final startM = CashbookService.reminderMinute >= 30 ? 30 : 0;
     var totalMin = startH * 60 + startM;
-    const lastMin = 23 * 60 + 30; // রাত ১১:৩০
+    const lastMin = 22 * 60; // রাত ১০টা — ব্যবহারকারীর নির্দেশ (২০২৬-১১-১৬): সতর্কতা রাত ৮টা–১০টার মধ্যে
     final slots = <(int, int)>[];
     while (totalMin <= lastMin && slots.length < 8) {
       slots.add((totalMin ~/ 60, totalMin % 60));
@@ -104,6 +105,7 @@ class CashbookNotificationService {
   static Future<void> refresh() async {
     await _init();
     await _cancelAllSlots();
+    await _plugin.cancel(_eveningOngoingId);
 
     if (!CashbookService.reminderEnabled) return; // ব্যবহারকারী বন্ধ রেখেছে
 
@@ -131,6 +133,46 @@ class CashbookNotificationService {
         const NotificationDetails(android: androidDetails),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
+
+    // আবশ্যিক সতর্কতা (ব্যবহারকারীর নির্দেশ ২০২৬-১১-১৬): সন্ধ্যার
+    // শুরুর সময় থেকে এন্ট্রি না করা পর্যন্ত নোটিফিকেশন বারে লেগে
+    // থাকে — swipe করে সরানো যায় না, এন্ট্রি দিলেই নিজে উঠে যায়।
+    // শুরুর সময় আগে থাকলে ঠিক সময়ে আসার শিডিউল, পেরিয়ে গেলে এখনই।
+    final start = DateTime(now.year, now.month, now.day,
+        CashbookService.reminderHour, CashbookService.reminderMinute);
+    const eveningDetails = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'cashbook_evening_channel',
+        'ক্যাশবুক আবশ্যিক সতর্কতা',
+        channelDescription: 'আজকের হিসাব না লেখা পর্যন্ত সন্ধ্যা থেকে লেগে-থাকা সতর্কতা',
+        importance: Importance.max,
+        priority: Priority.max,
+        icon: '@mipmap/ic_launcher',
+        playSound: true,
+        enableVibration: true,
+        ongoing: true,
+        autoCancel: false,
+        category: AndroidNotificationCategory.reminder,
+      ),
+    );
+    if (now.isBefore(start)) {
+      await _plugin.zonedSchedule(
+        _eveningOngoingId,
+        '🧾 আজকের হিসাব এখনও লেখা হয়নি',
+        'ক্যাশবুকে আজকের জমা/খরচ যোগ করো — এন্ট্রি না দেওয়া পর্যন্ত এই সতর্কতা থাকবে',
+        tz.TZDateTime.from(start, tz.local),
+        eveningDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } else {
+      await _plugin.show(
+        _eveningOngoingId,
+        '🧾 আজকের হিসাব এখনও লেখা হয়নি',
+        'ক্যাশবুকে আজকের জমা/খরচ যোগ করো — এন্ট্রি না দেওয়া পর্যন্ত এই সতর্কতা থাকবে',
+        eveningDetails,
       );
     }
   }
