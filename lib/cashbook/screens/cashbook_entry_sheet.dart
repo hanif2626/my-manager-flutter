@@ -52,6 +52,9 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
   List<String> _recentIds = []; // এই ধরনে (জমা/খরচ) সাম্প্রতিক ব্যবহৃত ক্যাটাগরি, নতুন আগে
   bool _expanded = false;
   bool _touched = false; // ব্যবহারকারী নিজে ক্যাটাগরি বাছলে ডিফল্ট আর বদলাবে না
+  bool _amountManual = false; // ব্যবহারকারী নিজে পরিমাণ লিখলে/ক্যালকুলেটরে বসালে নোটের auto-যোগ আর ওভাররাইট করবে না
+  bool _settingAmount = false; // auto-যোগ পরিমাণ বসানোর মুহূর্ত — ওই onChanged-কে manual ধরা যাবে না
+  double _noteSum = 0; // নোটের ভেতরের সব সংখ্যার যোগ
 
   bool get _isEdit => widget.entry != null;
 
@@ -68,6 +71,7 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
     _loadRecents();
     _recurring = e?.recurring ?? false;
     _voucherBase64 = e?.voucherImage;
+    _noteSum = _sumInNote(_noteCtrl.text);
   }
 
   String _trimZero(double v) =>
@@ -85,7 +89,10 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
   Future<void> _openCalculator() async {
     final result = await CalculatorSheet.show(context);
     if (result != null) {
-      setState(() => _amountCtrl.text = _trimZero(result));
+      setState(() {
+        _amountCtrl.text = _trimZero(result);
+        _amountManual = true; // ক্যালকুলেটরে নিজে হিসাব করেছে — auto-যোগ থামাও
+      });
     }
   }
 
@@ -108,6 +115,68 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
     _amountCtrl.text = digit;
     _noteCtrl.clear();
     _amountFocus.requestFocus();
+  }
+
+  /// নোটের ভেতরের সব সংখ্যার যোগ — "মাছ-৪০০, খাওয়া ১০০, মিঠাই ১৫০"
+  /// লিখলেই মোট (৬৫০) পরিমাণের ঘরে নিজে বসে যায়। বাংলা/ইংরেজি দুই
+  /// সংখ্যাই চলে; হাজারের কমা (১,০০০) একটাই সংখ্যা হিসেবে ধরা হয়,
+  /// আইটেম আলাদা করা কমা যোগ ভাঙে না।
+  double _sumInNote(String text) {
+    const bn = '০১২৩৪৫৬৭৮৯';
+    final s = StringBuffer();
+    for (final ch in text.split('')) {
+      final i = bn.indexOf(ch);
+      s.write(i >= 0 ? '$i' : ch);
+    }
+    final t = s.toString();
+    bool isDigit(String c) {
+      final u = c.codeUnitAt(0);
+      return u >= 48 && u <= 57;
+    }
+
+    var sum = 0.0;
+    var cur = StringBuffer();
+    void flush() {
+      if (cur.isNotEmpty) {
+        sum += double.tryParse(cur.toString()) ?? 0;
+        cur = StringBuffer();
+      }
+    }
+
+    for (var i = 0; i < t.length; i++) {
+      final c = t[i];
+      if (isDigit(c) || c == '.') {
+        cur.write(c);
+      } else if (c == ',' && cur.isNotEmpty && i + 1 < t.length && isDigit(t[i + 1])) {
+        // হাজারের কমা — সংখ্যারই অংশ, আইটেমের আলাদা-করা কমা নয়
+      } else {
+        flush();
+      }
+    }
+    flush();
+    return sum;
+  }
+
+  void _setAmountFromSum(double sum) {
+    _settingAmount = true;
+    _amountCtrl.text = _trimZero(sum);
+    _amountCtrl.selection =
+        TextSelection.collapsed(offset: _amountCtrl.text.length);
+    _settingAmount = false;
+  }
+
+  /// নোট বদলালেই: প্রথম-অক্ষর routing (আগের মতোই) + নোটের সংখ্যার
+  /// যোগ পরিমাণে বসানো। ব্যবহারকারী নিজে পরিমাণের ঘরে লিখে থাকলে
+  /// auto-যোগ আর ওভাররাইট করে না — তখন নিচে ট্যাপ-যোগ্য হিন্ট থাকে।
+  void _onNoteChanged(String value) {
+    _routeFirstChar(value);
+    final sum = _sumInNote(_noteCtrl.text);
+    setState(() => _noteSum = sum);
+    if (!_amountManual && sum > 0) {
+      if (BanglaDigitInputFormatter.parse(_amountCtrl.text) != sum) {
+        _setAmountFromSum(sum);
+      }
+    }
   }
 
   Future<void> _loadRecents() async {
@@ -316,6 +385,9 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
                 child: TextField(
                   controller: _amountCtrl,
                   focusNode: _amountFocus,
+                  onChanged: (_) => setState(() {
+                    if (!_settingAmount) _amountManual = true;
+                  }),
                   autofocus: _isEdit,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [BanglaDigitInputFormatter()],
@@ -375,7 +447,7 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
               controller: _noteCtrl,
               focusNode: _noteFocus,
               autofocus: !_isEdit,
-              onChanged: _routeFirstChar,
+              onChanged: _onNoteChanged,
               decoration: InputDecoration(
                 // ফাঁকা বক্স যেন টেক্সট-বক্স বলে বোঝা যায়
                 hintText: 'Note (ঐচ্ছিক)',
@@ -403,6 +475,26 @@ class _CashbookEntrySheetState extends State<CashbookEntrySheet> {
                 ]),
               ),
             ),
+
+            // নোটের যোগ পরিমাণের সাথে না মিললে ট্যাপ-যোগ্য হিন্ট —
+            // ট্যাপ করলেই যোগটা পরিমাণে বসে (auto বসেনি তখনই, যখন
+            // ব্যবহারকারী নিজে পরিমাণ লিখেছে)।
+            if (_noteSum > 0 &&
+                BanglaDigitInputFormatter.parse(_amountCtrl.text) != _noteSum) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _setAmountFromSum(_noteSum)),
+                  icon: Icon(Icons.functions, size: 16, color: AppTheme.accent),
+                  label: Text('নোটের যোগ: ৳${_trimZero(_noteSum)} — ট্যাপ করলে পরিমাণে বসবে',
+                      style: TextStyle(color: AppTheme.accent, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
 
             // date — compact single row with prev/next day arrows
