@@ -28,7 +28,7 @@ class AutoBackup {
 
   /// সব মডিউল ব্যাকআপ করে; সব সফল হলে true। সেটিং বন্ধ থাকলে false।
   static Future<bool> runAll() async {
-    if (!SettingsService.getBool('auto_backup_enabled', defaultValue: false)) {
+    if (!SettingsService.getBool('auto_backup_enabled', defaultValue: true)) {
       return false;
     }
     final drive = DriveService.instance;
@@ -63,7 +63,7 @@ class AutoBackup {
   /// চালায় — WorkManager পিছিয়ে গেলেও লম্বা ফাঁক থাকে না।
   static Future<void> runIfDue() async {
     try {
-      if (!SettingsService.getBool('auto_backup_enabled', defaultValue: false)) return;
+      if (!SettingsService.getBool('auto_backup_enabled', defaultValue: true)) return;
       final last = lastMs;
       final stale = last == 0 ||
           DateTime.now().millisecondsSinceEpoch - last >

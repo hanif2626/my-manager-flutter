@@ -23,7 +23,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isDark = SettingsService.isDark;
   bool _bubbleEnabled = SettingsService.getBool('bubble_enabled', defaultValue: false);
   bool _bubbleBusy = false;
-  bool _autoBackupEnabled = SettingsService.getBool('auto_backup_enabled', defaultValue: false);
+  bool _autoBackupEnabled = SettingsService.getBool('auto_backup_enabled', defaultValue: true);
   bool _autoBackupBusy = false;
   bool _digestEnabled = true;
   int _digestHour = 8;

@@ -103,13 +103,14 @@ void main() async {
   } catch (_) {
     // Never let a bubble-restore failure prevent the app from starting.
   }
-  // Auto-backup on WiFi — opt-in, off by default. If the person turned
-  // it on in Settings, make sure the periodic task is (re-)registered
+  // Auto-backup on WiFi — ON by default (user decision 2026-11-16:
+  // backup must be regular-auto; Settings can still turn it off).
+  // Make sure the periodic task is (re-)registered
   // every time the app starts, in case it was somehow lost (e.g. after
   // a device reboot on some Android versions).
   try {
     await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
-    if (SettingsService.getBool('auto_backup_enabled', defaultValue: false)) {
+    if (SettingsService.getBool('auto_backup_enabled', defaultValue: true)) {
       await Workmanager().registerPeriodicTask(
         autoBackupTaskName, autoBackupTaskName,
         frequency: const Duration(hours: 1),
@@ -207,7 +208,7 @@ void callbackDispatcher() {
         return true;
       }
       await SettingsService.init();
-      if (!SettingsService.getBool('auto_backup_enabled', defaultValue: false)) {
+      if (!SettingsService.getBool('auto_backup_enabled', defaultValue: true)) {
         return true;
       }
       await AutoBackup.runAll();

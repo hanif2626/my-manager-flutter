@@ -53,7 +53,7 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
   List<_Mod> get _mods => [
         _Mod('main', '📁', 'প্রজেক্ট, আইডিয়া ও ফাইল',
             'প্রজেক্ট, টাস্ক, সংযুক্ত ফাইল, ভার্সন', 'mymanager_backup.json',
-            auto: SettingsService.getBool('auto_backup_enabled', defaultValue: false),
+            auto: SettingsService.getBool('auto_backup_enabled', defaultValue: true),
             ),
         const _Mod('cashbook', '💰', 'ক্যাশবুক', 'খাতা, এন্ট্রি, আবশ্যিক খরচ, দেনা-পাওনা (প্রতি পরিবর্তনে নিজে)',
             'cashbook_backup.json', auto: true),
@@ -427,7 +427,7 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
           children: [
             _accountCard(signedIn, drive.userEmail),
             const SizedBox(height: 12),
-            if (signedIn && SettingsService.getBool('auto_backup_enabled', defaultValue: false)) ...[
+            if (signedIn && SettingsService.getBool('auto_backup_enabled', defaultValue: true)) ...[
               _autoStatusLine(),
               const SizedBox(height: 12),
             ],
