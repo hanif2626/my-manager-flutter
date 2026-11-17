@@ -168,7 +168,7 @@ class _CashbookScreenState extends State<CashbookScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('প্রতিদিন মনে করিয়ে দাও'),
-              subtitle: const Text('সেই সময় থেকে রাত ১১:৩০ পর্যন্ত প্রতি ৩০ মিনিটে, '
+              subtitle: const Text('সেই সময় থেকে রাত ১০টা পর্যন্ত প্রতি ৩০ মিনিটে, '
                   'যতক্ষণ না আজকের একটা এন্ট্রি হয়'),
               value: enabled,
               onChanged: (v) => setSt(() => enabled = v),

@@ -10,7 +10,7 @@ import '../../reminder/services/reminder_service.dart';
 
 /// "রাত ৮টা থেকে শুরু করে প্রতি ৩০ মিনিটে মনে করিয়ে দাও, যতক্ষণ না আজ
 /// অন্তত একটা এন্ট্রি হয়" — implemented as a fixed chain of *exact*
-/// alarms (8:00, 8:30, ... 11:30pm), not a single schedule plus a
+/// alarms (8:00, 8:30, ... 10:00pm), not a single schedule plus a
 /// periodic background poll. Exact alarms (AndroidScheduleMode.
 /// exactAllowWhileIdle, backed by USE_EXACT_ALARM in the manifest) are
 /// far more likely to actually fire on time on battery-aggressive OEMs
@@ -30,7 +30,7 @@ class CashbookNotificationService {
   static const _channelId = 'cashbook_reminder_channel';
   static const _eveningOngoingId = 7830; // সন্ধ্যার লেগে-থাকা আবশ্যিক সতর্কতা
 
-  // সেটিংসে ব্যবহারকারীর দেওয়া সময় থেকে শুরু করে, প্রতি ৩০ মিনিটে, রাত ১১:৩০
+  // সেটিংসে ব্যবহারকারীর দেওয়া সময় থেকে শুরু করে, প্রতি ৩০ মিনিটে, রাত ১০টা
   // পর্যন্ত (বা শুরুর সময় তার পরে হলে অন্তত একটা স্লট) — প্রতিটা স্লট নিজের
   // নোটিফিকেশন আইডি নিয়ে আলাদাভাবে শিডিউল/বাতিল হয়।
   static List<(int, int)> get _slots {
@@ -113,6 +113,10 @@ class CashbookNotificationService {
     if (hasEntry) return; // today's already logged — nothing to nag about
 
     final now = DateTime.now();
+    // রাত ১০টার পর আজ আর কোনো সতর্কতা নয় (ব্যবহারকারীর উইন্ডো
+    // ৮টা–১০টা) — স্লট ও লেগে-থাকা দুটোই উপরে বাতিল হয়ে গেছে,
+    // এখান থেকে নতুন করে কিছু বসবে না।
+    if (now.hour * 60 + now.minute >= 22 * 60) return;
     const androidDetails = AndroidNotificationDetails(
       _channelId,
       'ক্যাশবুক রিমাইন্ডার',
@@ -131,6 +135,7 @@ class CashbookNotificationService {
         'ক্যাশবুকে আজকের জমা/খরচ যোগ করো — অন্তত একটা এন্ট্রি দিলেই আর মনে করাবে না',
         tz.TZDateTime.from(scheduled, tz.local),
         const NotificationDetails(android: androidDetails),
+        payload: 'cashbook_evening',
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       );
@@ -164,6 +169,7 @@ class CashbookNotificationService {
         'ক্যাশবুকে আজকের জমা/খরচ যোগ করো — এন্ট্রি না দেওয়া পর্যন্ত এই সতর্কতা থাকবে',
         tz.TZDateTime.from(start, tz.local),
         eveningDetails,
+        payload: 'cashbook_evening',
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       );
@@ -173,12 +179,14 @@ class CashbookNotificationService {
         '🧾 আজকের হিসাব এখনও লেখা হয়নি',
         'ক্যাশবুকে আজকের জমা/খরচ যোগ করো — এন্ট্রি না দেওয়া পর্যন্ত এই সতর্কতা থাকবে',
         eveningDetails,
+        payload: 'cashbook_evening',
       );
     }
   }
 
   static Future<void> cancel() async {
     await _cancelAllSlots();
+    await _plugin.cancel(_eveningOngoingId);
   }
 
   /// Called every ~30 minutes by a background WorkManager task (see

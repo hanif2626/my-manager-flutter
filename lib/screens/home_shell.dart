@@ -55,9 +55,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     DataSync.ideasChanged.addListener(_onExternalChange);
     DataSync.start();
     ReminderService.openRequest.addListener(_openReminders);
+    ReminderService.cashbookOpenRequest.addListener(_openCashbookFromNotification);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkBubbleTarget());
     ReminderService.launchedFromReminder().then((launched) {
       if (launched && mounted) _openReminders();
+    });
+    ReminderService.launchedFromCashbook().then((launched) {
+      if (launched && mounted) _openCashbook();
     });
   }
 
@@ -123,6 +127,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     DataSync.stop();
     WidgetsBinding.instance.removeObserver(this);
     ReminderService.openRequest.removeListener(_openReminders);
+    ReminderService.cashbookOpenRequest.removeListener(_openCashbookFromNotification);
     _shareSub?.cancel();
     super.dispose();
   }
@@ -171,6 +176,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (ok && mounted) {
       Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()));
     }
+  }
+
+  bool _cashbookNotifOpen = false;
+
+  /// সন্ধ্যার ক্যাশবুক সতর্কতায় ট্যাপ — সরাসরি ক্যাশবুক খোলে
+  /// (লক চালু থাকলে _openCashbook-এর ভেতরেই যাচাই হয়)।
+  Future<void> _openCashbookFromNotification() async {
+    if (_cashbookNotifOpen || !mounted) return;
+    _cashbookNotifOpen = true;
+    await _openCashbook();
+    _cashbookNotifOpen = false;
   }
 
   /// Cashbook follows the exact same "authenticate, then push as its own

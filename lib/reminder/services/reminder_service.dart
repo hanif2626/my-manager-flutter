@@ -41,6 +41,10 @@ class ReminderService {
   /// নোটিফিকেশনের বডিতে ট্যাপ করলে HomeShell এটা দেখে Reminder স্ক্রিন খোলে।
   static final ValueNotifier<int> openRequest = ValueNotifier(0);
 
+  /// ক্যাশবুকের সন্ধ্যার সতর্কতায় (payload 'cashbook_evening') ট্যাপ
+  /// করলে HomeShell এটা দেখে ক্যাশবুক খোলে।
+  static final ValueNotifier<int> cashbookOpenRequest = ValueNotifier(0);
+
   static int _baseId(int reminderId) => 100000000 + (reminderId % 1000000) * 1000;
   static int _snoozeId(int reminderId) => _baseId(reminderId) + 999;
 
@@ -72,6 +76,13 @@ class ReminderService {
 
   static Future<void> handleResponse(NotificationResponse r) async {
     final p = r.payload;
+    if (p == 'cashbook_evening') {
+      if (r.notificationResponseType ==
+          NotificationResponseType.selectedNotification) {
+        cashbookOpenRequest.value++;
+      }
+      return;
+    }
     if (p == null || !p.startsWith('rem|')) return;
     final parts = p.split('|');
     if (parts.length < 3) return;
@@ -88,6 +99,19 @@ class ReminderService {
     } else if (r.notificationResponseType ==
         NotificationResponseType.selectedNotification) {
       openRequest.value++;
+    }
+  }
+
+  /// অ্যাপ ক্যাশবুকের সন্ধ্যার সতর্কতায় ট্যাপ করে কোল্ড-স্টার্ট হয়েছিল কি না।
+  static Future<bool> launchedFromCashbook() async {
+    try {
+      await ensureReady();
+      final d = await _plugin.getNotificationAppLaunchDetails();
+      return (d?.didNotificationLaunchApp ?? false) &&
+          d?.notificationResponse?.payload == 'cashbook_evening' &&
+          d?.notificationResponse?.actionId == null;
+    } catch (_) {
+      return false;
     }
   }
 
