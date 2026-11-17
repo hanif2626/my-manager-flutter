@@ -23,12 +23,13 @@ class DocCaptureFlow {
     ImageSource source, {
     List<String>? labels,
     int startNumber = 1,
+    bool skipPrompts = false,
   }) async {
     final out = <Captured>[];
     try {
       if (labels != null) {
         for (var i = 0; i < labels.length; i++) {
-          if (labels.length > 1) {
+          if (labels.length > 1 && !skipPrompts) {
             if (!context.mounted) break;
             final go = await _prompt(context, source, labels[i], i + 1, labels.length);
             if (!go) break;

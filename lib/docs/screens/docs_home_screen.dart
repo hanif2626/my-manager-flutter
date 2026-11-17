@@ -14,6 +14,7 @@ import 'doc_viewer_screen.dart';
 import '../services/docs_export_service.dart';
 import 'docs_backup_sheet.dart';
 import 'doc_type_picker.dart';
+import 'doc_quick_add.dart';
 
 /// ডকুমেন্ট ও সনদের এনক্রিপ্টেড ভল্ট। ঢুকতে ফিঙ্গারপ্রিন্ট/PIN লাগে; অ্যাপ
 /// ব্যাকগ্রাউন্ডে গেলে নিজে বন্ধ হয় (ভল্টের মতো)।
@@ -190,11 +191,16 @@ class _DocsHomeScreenState extends State<DocsHomeScreen> with WidgetsBindingObse
   }
 
   Future<void> _add() async {
-    final t = await showDocTypePicker(context);
-    if (t == null || !mounted) return;
     final preset = (_owner == null || _owner == DocOwners.all) ? null : _owner;
-    final saved = await showDocForm(context, template: t, presetCategory: _cat == 'all' ? null : _cat, presetOwner: preset);
-    if (!saved || !mounted) return;
+    // সহজ পথটাই আগে (দ্রুত যোগ); ওখান থেকে বিস্তারিত ফর্মও বাছা যায়।
+    final r = await showDocQuickAdd(context, presetOwner: preset);
+    if (r == null || !mounted) return;
+    if (r.action == 'classic') {
+      final t = r.template;
+      if (t == null) return;
+      final saved = await showDocForm(context, template: t, presetCategory: _cat == 'all' ? null : _cat, presetOwner: preset);
+      if (!saved || !mounted) return;
+    }
     // অন্য নামে যোগ করে থাকলে সেই নামের তালিকায় চলে যাই — যাতে নতুন ডকুমেন্টটা চোখে পড়ে।
     final l = await DocsService.list();
     if (l.isEmpty) return;
