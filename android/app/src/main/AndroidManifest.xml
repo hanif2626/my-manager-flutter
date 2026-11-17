@@ -81,6 +81,10 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Long-press app-icon shortcuts (e.g. Authenticator). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts"/>
 
             <!-- "Share TO My Manager" — lets other apps (browser, gallery,
                  WhatsApp, etc.) share text, links, images, or files

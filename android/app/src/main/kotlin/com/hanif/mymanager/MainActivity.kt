@@ -12,20 +12,26 @@ class MainActivity : FlutterFragmentActivity() {
 
     companion object {
         const val EXTRA_BUBBLE_TARGET = "bubble_target"
+        const val EXTRA_LAUNCH_TARGET = "launch_target"
     }
 
     // বাবল থেকে আসা গন্তব্য — Dart একবার পড়ে নিলেই শেষ।
     private var pendingBubbleTarget: String? = null
 
+    // হোম-স্ক্রিন শর্টকাট (লং-প্রেস) থেকে আসা গন্তব্য — একইভাবে একবারই পড়া হয়।
+    private var pendingLaunchTarget: String? = null
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         pendingBubbleTarget = intent?.getStringExtra(EXTRA_BUBBLE_TARGET)
+        pendingLaunchTarget = intent?.getStringExtra(EXTRA_LAUNCH_TARGET)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingBubbleTarget = intent.getStringExtra(EXTRA_BUBBLE_TARGET)
+        pendingLaunchTarget = intent.getStringExtra(EXTRA_LAUNCH_TARGET)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -94,6 +100,11 @@ class MainActivity : FlutterFragmentActivity() {
                         } catch (e: Exception) {
                             result.success(false)
                         }
+                    }
+                    "takeLaunchTarget" -> {
+                        val t = pendingLaunchTarget
+                        pendingLaunchTarget = null
+                        result.success(t)
                     }
                     else -> result.notImplemented()
                 }

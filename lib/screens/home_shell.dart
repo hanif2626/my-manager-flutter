@@ -18,6 +18,10 @@ import 'share_intake_screen.dart';
 import 'vault_screen.dart';
 import '../cashbook/screens/cashbook_screen.dart';
 import 'life_home_screen.dart';
+import 'authenticator_screen.dart';
+import 'pattern_lock_screen.dart';
+import '../services/vault_pattern_service.dart';
+import '../jobs/services/app_launcher.dart';
 import '../reminder/screens/reminder_screen.dart';
 import '../reminder/services/reminder_service.dart';
 import '../services/notification_service.dart';
@@ -56,7 +60,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     DataSync.start();
     ReminderService.openRequest.addListener(_openReminders);
     ReminderService.cashbookOpenRequest.addListener(_openCashbookFromNotification);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkBubbleTarget());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkBubbleTarget();
+      _checkLaunchTarget();
+    });
     ReminderService.launchedFromReminder().then((launched) {
       if (launched && mounted) _openReminders();
     });
@@ -77,6 +84,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       nav.popUntil((r) => r.isFirst);
       nav.push(MaterialPageRoute(builder: (_) => const BackupScreen()));
     }
+  }
+
+  /// হোম-স্ক্রিন আইকনে লং-প্রেস শর্টকাট থেকে আসা গন্তব্য
+  /// (এখন 'authenticator') — বাবল টার্গেটের মতোই একবার পড়লেই শেষ।
+  Future<void> _checkLaunchTarget() async {
+    if (BubbleWindow.isBubble || !mounted) return;
+    final t = await AppLauncher.takeLaunchTarget();
+    if (t == 'authenticator' && mounted) _openAuthenticator();
   }
 
   bool _reminderOpen = false;
@@ -149,6 +164,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       NotificationService.scheduleDailyDigest().catchError((_) {});
       ReminderService.changes.value++;
       _checkBubbleTarget();
+      _checkLaunchTarget();
     }
     // Refresh the home screen widget whenever the app leaves the
     // foreground — covers ideas added/edited/completed during the
@@ -174,7 +190,29 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
     final ok = await AuthService.authenticate(reason: 'ভল্ট খুলতে যাচাই করো');
     if (ok && mounted) {
+      // ভল্টের নিজস্ব প্যাটার্ন লক (সেট করা থাকলে) — ফিঙ্গারপ্রিন্টের
+      // পরের আলাদা স্তর (ব্যবহারকারীর নির্দেশ ২০২৬-১১-১৭)।
+      if (await VaultPatternService.isSet()) {
+        final pok = await Navigator.push<bool>(context,
+            MaterialPageRoute(builder: (_) => const PatternLockScreen(mode: PatternLockMode.unlock)));
+        if (pok != true || !mounted) return;
+      }
       Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()));
+    }
+  }
+
+  /// Authenticator এখন ভল্টের বাইরে, হাতের কাছে (ব্যবহারকারীর
+  /// নির্দেশ ২০২৬-১১-১৭) — হোম গ্রিড ও লং-প্রেস শর্টকাট দুই পথই
+  /// এখানে আসে। ফিঙ্গারপ্রিন্ট যাচাই লাগে; ডিভাইসে কোনো যাচাই
+  /// পদ্ধতিই না থাকলে সরাসরি খোলে (আটকানোর উপায় নেই বলে)।
+  Future<void> _openAuthenticator() async {
+    final canAuth = await AuthService.canAuthenticate();
+    if (canAuth) {
+      final ok = await AuthService.authenticate(reason: 'Authenticator খুলতে যাচাই করো');
+      if (!ok || !mounted) return;
+    }
+    if (mounted) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const AuthenticatorScreen()));
     }
   }
 
@@ -259,6 +297,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         onOpenProjects: () => setState(() => _index = 1),
         onOpenVault: _openVault,
         onOpenCashbook: _openCashbook,
+        onOpenAuthenticator: _openAuthenticator,
         onOpenSettings: () => setState(() => _index = 3),
         onThemeToggle: widget.onThemeToggle,
       ),

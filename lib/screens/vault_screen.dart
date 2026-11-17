@@ -8,6 +8,8 @@ import '../services/vault_csv_service.dart';
 import '../services/vault_backup_service.dart';
 import '../services/vault_backup_reminder.dart';
 import 'vault_backup_sheet.dart';
+import 'pattern_lock_screen.dart';
+import '../services/vault_pattern_service.dart';
 import '../widgets/app_theme.dart';
 import 'vault_entry_form_screen.dart';
 import 'authenticator_screen.dart';
@@ -142,6 +144,52 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
         (e.url?.toLowerCase().contains(q) ?? false)).toList();
   }
 
+  /// ভল্টের নিজস্ব প্যাটার্ন লক: সেট / বদলানো / সরানো।
+  /// বদলাতে বা সরাতে আগে বর্তমান প্যাটার্নে যাচাই বাধ্যতামূলক।
+  Future<void> _patternSettings() async {
+    final isSet = await VaultPatternService.isSet();
+    if (!mounted) return;
+    if (!isSet) {
+      final done = await Navigator.push<bool>(context,
+          MaterialPageRoute(builder: (_) => const PatternLockScreen(mode: PatternLockMode.setup)));
+      if (done == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('✅ প্যাটার্ন লক চালু হয়েছে — এখন থেকে ভল্ট খুলতে প্যাটার্ন লাগবে')));
+      }
+      return;
+    }
+    final ok = await Navigator.push<bool>(context,
+        MaterialPageRoute(builder: (_) => const PatternLockScreen(mode: PatternLockMode.unlock)));
+    if (ok != true || !mounted) return;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('প্যাটার্ন লক চালু আছে'),
+        content: const Text('প্যাটার্ন বদলাবে, নাকি লকটাই সরিয়ে দেবে?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('থাকুক')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'remove'), child: const Text('সরাও')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'change'), child: const Text('বদলাও')),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'remove') {
+      await VaultPatternService.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('প্যাটার্ন লক সরানো হয়েছে')));
+      }
+    } else if (action == 'change') {
+      final done = await Navigator.push<bool>(context,
+          MaterialPageRoute(builder: (_) => const PatternLockScreen(mode: PatternLockMode.setup)));
+      if (done == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✅ নতুন প্যাটার্ন সেট হয়েছে')));
+      }
+    }
+  }
+
   Future<void> _openForm({VaultEntry? entry}) async {
     await Navigator.push(context, MaterialPageRoute(
         builder: (_) => VaultEntryFormScreen(entry: entry)));
@@ -228,6 +276,11 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
             tooltip: 'Authenticator',
             onPressed: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const AuthenticatorScreen())),
+          ),
+          IconButton(
+            icon: Icon(Icons.pattern, color: AppTheme.textSecondary),
+            tooltip: 'প্যাটার্ন লক',
+            onPressed: _patternSettings,
           ),
           IconButton(
             icon: Icon(Icons.security, color: AppTheme.textSecondary),

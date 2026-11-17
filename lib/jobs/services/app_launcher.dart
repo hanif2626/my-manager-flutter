@@ -24,6 +24,16 @@ class AppLauncher {
     }
   }
 
+  /// হোম-স্ক্রিন শর্টকাট (আইকনে লং-প্রেস) থেকে আসা গন্তব্য —
+  /// একবার পড়লেই শেষ ('authenticator' বা null)।
+  static Future<String?> takeLaunchTarget() async {
+    try {
+      return await _ch.invokeMethod<String>('takeLaunchTarget');
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<bool> openUrl(String url) async {
     var u = url.trim();
     if (u.isEmpty) return false;

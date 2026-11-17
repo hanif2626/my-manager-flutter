@@ -20,11 +20,12 @@ class _Module {
   const _Module(this.name, this.icon, this.color, {this.ready = false});
 }
 
-const _readyModules = <String>{'ক্যাশবুক', 'ভল্ট', 'প্রজেক্ট', 'চাকরি হাব', 'পরিবার', 'ডকুমেন্ট ও তথ্য', 'স্ক্রিন টাইম', 'রিমাইন্ডার', 'ব্যাকআপ', 'সেটিংস'};
+const _readyModules = <String>{'ক্যাশবুক', 'ভল্ট', 'Authenticator', 'প্রজেক্ট', 'চাকরি হাব', 'পরিবার', 'ডকুমেন্ট ও তথ্য', 'স্ক্রিন টাইম', 'রিমাইন্ডার', 'ব্যাকআপ', 'সেটিংস'};
 
 const _modules = [
   _Module('ক্যাশবুক', Icons.account_balance_wallet, Color(0xFF4F46E5), ready: true),
   _Module('ভল্ট', Icons.lock, Color(0xFF15803D), ready: true),
+  _Module('Authenticator', Icons.qr_code_2_outlined, Color(0xFF0E7C86), ready: true),
   _Module('প্রজেক্ট', Icons.folder, Color(0xFFB45309), ready: true),
   _Module('চাকরি হাব', Icons.work_outline_rounded, Color(0xFF38BDF8), ready: true),
   _Module('রিমাইন্ডার', Icons.notifications_active, Color(0xFFFBBF24), ready: true),
@@ -39,6 +40,7 @@ class LifeHomeScreen extends StatefulWidget {
   final VoidCallback onOpenProjects;
   final VoidCallback onOpenVault;
   final VoidCallback onOpenCashbook;
+  final VoidCallback onOpenAuthenticator;
   final VoidCallback onOpenSettings;
   final VoidCallback onThemeToggle;
 
@@ -47,6 +49,7 @@ class LifeHomeScreen extends StatefulWidget {
     required this.onOpenProjects,
     required this.onOpenVault,
     required this.onOpenCashbook,
+    required this.onOpenAuthenticator,
     required this.onOpenSettings,
     required this.onThemeToggle,
   });
@@ -129,6 +132,7 @@ class _LifeHomeScreenState extends State<LifeHomeScreen> {
       case 'প্রজেক্ট': widget.onOpenProjects(); return;
       case 'ভল্ট': widget.onOpenVault(); return;
       case 'ক্যাশবুক': widget.onOpenCashbook(); return;
+      case 'Authenticator': widget.onOpenAuthenticator(); return;
       case 'রিমাইন্ডার':
         Navigator.push(context, MaterialPageRoute(builder: (_) => const ReminderScreen()))
             .then((_) => _loadRemCount());

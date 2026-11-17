@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="authenticator"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_authenticator"
+        android:shortcutLongLabel="@string/shortcut_authenticator_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.hanif.mymanager"
+            android:targetClass="com.hanif.mymanager.MainActivity">
+            <extra android:name="launch_target" android:value="authenticator" />
+        </intent>
+    </shortcut>
+</shortcuts>

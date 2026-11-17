@@ -537,7 +537,7 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
             Row(children: [
               const Icon(Icons.check_circle_outline, size: 18, color: Colors.green),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text('ভল্ট অটো-ব্যাকআপ চালু আছে — পাসওয়ার্ড সংরক্ষিত',
                     style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5)),
               ),
