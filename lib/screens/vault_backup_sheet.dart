@@ -553,7 +553,7 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
               ),
             ])
           else
-            const Text('হাতে একবার ব্যাকআপ সফল হলেই সেই পাসওয়ার্ড সংরক্ষিত হয়ে ভল্টের অটো-ব্যাকআপ চালু হয়ে যাবে।',
+            Text('হাতে একবার ব্যাকআপ সফল হলেই সেই পাসওয়ার্ড সংরক্ষিত হয়ে ভল্টের অটো-ব্যাকআপ চালু হয়ে যাবে।',
                 style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5)),
           if (_busy)
             const Padding(
