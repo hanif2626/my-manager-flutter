@@ -82,14 +82,31 @@ class DriveService {
   }
 
   Future<bool> signInSilently() async {
-    try {
-      _account = await _googleSignIn.signInSilently();
-      if (_account == null) return false;
-      await _initApi();
-      return true;
-    } catch (e) {
-      return false;
+    // নতুন process-এ প্রথম silent চেষ্টা প্রায়ই null ফেরত দেয়
+    // (GoogleSignIn-এর পরিচিত আচরণ) — অথচ AutoBackup ঠিক সেই
+    // প্রথম চেষ্টার ওপরই নির্ভর করে (v1579 পর্যন্ত এ কারণে auto
+    // বারবার ব্যর্থ হচ্ছিল, হাতে ব্যাকআপ চলত)। তাই ছোট বিরতি
+    // দিয়ে মোট ৩ বার চেষ্টা; আসল ত্রুটি lastError-এ থেকে যায়,
+    // যাতে Backup Center-এর লাইনে কারণটা দেখানো যায়।
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(
+            Duration(milliseconds: attempt == 1 ? 1200 : 2500));
+      }
+      try {
+        _account = await _googleSignIn.signInSilently();
+        if (_account == null) {
+          lastError = 'silent sign-in: কোনো অ্যাকাউন্ট পাওয়া যায়নি';
+          continue;
+        }
+        await _initApi();
+        lastError = null;
+        return true;
+      } catch (e) {
+        lastError = e.toString();
+      }
     }
+    return false;
   }
 
   /// সাইন-ইন না থাকলে আগে চুপচাপ (silent) চেষ্টা করে; [interactive] true হলে

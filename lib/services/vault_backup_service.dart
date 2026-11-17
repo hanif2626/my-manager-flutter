@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'bubble_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -86,6 +87,39 @@ class VaultBackupService {
   static Future<void> _markBackup() async {
     try {
       await SettingsService.setInt(_lastBackupKey, DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {}
+  }
+
+  // ───────────────────── অটো-ব্যাকআপের পাসওয়ার্ড ─────────────────────
+  // ব্যবহারকারীর নির্দেশ (২০২৬-১১-১৭): ভল্টও অটো-ব্যাকআপ হবে।
+  // তার জন্য ব্যাকআপ পাসওয়ার্ডটা Keystore-সুরক্ষিত স্টোরেজে থাকে
+  // (ভল্টের এন্ট্রিগুলো যেখানে থাকে, ঠিক সেখানেই)। হাতে ব্যাকআপ
+  // সফল হলেই শিট saveAutoPassword ডাকে; শিট থেকেই বন্ধও করা যায়।
+  static const _autoPwKey = 'vault_auto_backup_pw_v1';
+  static const _secure = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
+  static Future<void> saveAutoPassword(String pw) async {
+    try {
+      await _secure.write(key: _autoPwKey, value: pw);
+    } catch (_) {}
+  }
+
+  static Future<String?> autoPassword() async {
+    try {
+      final v = await _secure.read(key: _autoPwKey);
+      return (v == null || v.isEmpty) ? null : v;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<bool> hasAutoPassword() async => (await autoPassword()) != null;
+
+  static Future<void> clearAutoPassword() async {
+    try {
+      await _secure.delete(key: _autoPwKey);
     } catch (_) {}
   }
 

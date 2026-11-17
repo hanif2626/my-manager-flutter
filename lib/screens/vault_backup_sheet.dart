@@ -25,6 +25,23 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
   bool _busy = false;
   String? _status;
   bool _isError = false;
+  bool _autoOn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    VaultBackupService.hasAutoPassword().then((v) {
+      if (mounted) setState(() => _autoOn = v);
+    });
+  }
+
+  /// হাতে ব্যাকআপ সফল হলে এই পাসওয়ার্ডটাই অটো-ব্যাকআপের জন্য
+  /// Keystore-সুরক্ষিত স্টোরেজে রেখে দেওয়া হয় (ব্যবহারকারীর
+  /// নির্দেশ ২০২৬-১১-১৭: ভল্টও অটো-ব্যাকআপ হবে)।
+  Future<void> _rememberForAuto(String pw) async {
+    await VaultBackupService.saveAutoPassword(pw);
+    if (mounted) setState(() => _autoOn = true);
+  }
 
   /// বাইরের অ্যাক্টিভিটি (শেয়ার, ফাইল পিকার, Google সাইন-ইন) চলার সময়
   /// ভল্টের অটো-লক সাময়িক বন্ধ রাখে; শেষে আবার চালু।
@@ -320,8 +337,10 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
     setState(() { _busy = true; _status = 'এনক্রিপ্ট হচ্ছে... (কয়েক সেকেন্ড লাগতে পারে)'; _isError = false; });
     try {
       final n = await _external(() => VaultBackupService.exportToFile(pw, question: r0.question, answer: r0.answer));
+      await _rememberForAuto(pw);
       _setStatus('✅ $nটা এন্ট্রির এনক্রিপ্টেড ফাইল তৈরি হয়েছে।\n'
-          'শেয়ার মেনু থেকে Drive/Files/অন্য নিরাপদ জায়গায় সেভ করে নাও — ফাইলটা ফোনে একা রাখলে ফোন হারালে কাজে আসবে না।');
+          'শেয়ার মেনু থেকে Drive/Files/অন্য নিরাপদ জায়গায় সেভ করে নাও — ফাইলটা ফোনে একা রাখলে ফোন হারালে কাজে আসবে না।\n'
+          '🔁 এই পাসওয়ার্ড অটো-ব্যাকআপের জন্য সংরক্ষিত হয়েছে — এখন থেকে ভল্টও নিজে নিজে Drive-এ ব্যাকআপ হবে।');
     } on VaultBackupException catch (e) {
       _setStatus(e.message, error: true);
     } catch (e) {
@@ -338,7 +357,9 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
       final r = await _external(() => VaultBackupService.backupToDrive(pw, question: r0.question, answer: r0.answer));
       switch (r) {
         case VaultDriveResult.success:
-          _setStatus('✅ ভল্ট এনক্রিপ্ট হয়ে Google Drive-এ (MyManager_Backup ফোল্ডারে) সেভ হয়েছে।');
+          await _rememberForAuto(pw);
+          _setStatus('✅ ভল্ট এনক্রিপ্ট হয়ে Google Drive-এ (MyManager_Backup ফোল্ডারে) সেভ হয়েছে।\n'
+              '🔁 এই পাসওয়ার্ড অটো-ব্যাকআপের জন্য সংরক্ষিত হয়েছে — এখন থেকে ভল্টও নিজে নিজে ব্যাকআপ হবে।');
           break;
         case VaultDriveResult.notSignedIn:
           _setStatus('Google Account দিয়ে সাইন ইন করা যায়নি।', error: true);
@@ -511,6 +532,29 @@ class _VaultBackupSheetState extends State<_VaultBackupSheet> {
               'নতুন ফোন বা রিসেটের পর', _restoreDrive),
           _tile(Icons.folder_open_rounded, 'ফাইল থেকে রিস্টোর',
               '.mmvault ফাইল বেছে নাও', _restoreFile),
+          _sectionLabel('অটো-ব্যাকআপ'),
+          if (_autoOn)
+            Row(children: [
+              const Icon(Icons.check_circle_outline, size: 18, color: Colors.green),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('ভল্ট অটো-ব্যাকআপ চালু আছে — পাসওয়ার্ড সংরক্ষিত',
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5)),
+              ),
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        await VaultBackupService.clearAutoPassword();
+                        if (mounted) setState(() => _autoOn = false);
+                        _setStatus('ভল্ট অটো-ব্যাকআপ বন্ধ — সংরক্ষিত পাসওয়ার্ড মোছা হয়েছে। এখন থেকে আগের মতো reminder আসবে, ব্যাকআপ হাতে নিতে হবে।');
+                      },
+                child: const Text('বন্ধ করো'),
+              ),
+            ])
+          else
+            const Text('হাতে একবার ব্যাকআপ সফল হলেই সেই পাসওয়ার্ড সংরক্ষিত হয়ে ভল্টের অটো-ব্যাকআপ চালু হয়ে যাবে।',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5)),
           if (_busy)
             const Padding(
               padding: EdgeInsets.only(top: 8),
