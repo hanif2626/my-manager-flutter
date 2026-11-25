@@ -144,7 +144,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
            Text('শুধু নোট', style: TextStyle(
               color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
-          _field(noteCtrl, 'নোট লিখো...', maxLines: 5),
+          _field(noteCtrl, 'লিখুন…', maxLines: 5),
           const SizedBox(height: 12),
           SizedBox(width: double.infinity, child: ElevatedButton.icon(
             onPressed: () async {
@@ -627,7 +627,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     final others = _files.where((f) => !f.isImage && f.type != 'text').toList();
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.page,
       appBar: AppBar(
         title: Row(children: [
           Container(width: 10, height: 10, decoration: BoxDecoration(
@@ -671,7 +671,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                     margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                     decoration: BoxDecoration(
-                      color: AppTheme.bg2,
+                      color: AppTheme.card,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppTheme.border),
                     ),
@@ -780,7 +780,12 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
-                      child: Card(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppTheme.card,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppTheme.border),
+                        ),
                         child: ExpansionTile(
                           initiallyExpanded: false,
                           shape: const RoundedRectangleBorder(),
@@ -820,7 +825,7 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
         : (file.name.contains('.') ? '📄 ${file.name}' : '📝 নোট');
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.bg2,
+        color: AppTheme.card,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.border),
       ),
@@ -838,34 +843,31 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
           ),
         ]),
         const SizedBox(height: 8),
-        if (file.isImage && file.content != null)
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            GestureDetector(
-              onTap: () async {
-                await Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => ImageViewerScreen(file: file)));
-              },
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SafeBase64Image(
-                    data: file.content!,
-                    width: 105, height: 140, fit: BoxFit.cover,
-                    fallback: Container(
-                      width: 105, height: 140,
-                      alignment: Alignment.center,
-                      child: Text('ছবি লোড হয়নি',
-                          style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-                    )),
-              ),
+        if (file.isImage && file.content != null) ...[
+          GestureDetector(
+            onTap: () async {
+              await Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ImageViewerScreen(file: file)));
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SafeBase64Image(
+                  data: file.content!,
+                  width: double.infinity, height: 200, fit: BoxFit.cover,
+                  fallback: Container(
+                    width: double.infinity, height: 200,
+                    alignment: Alignment.center,
+                    child: Text('ছবি লোড হয়নি',
+                        style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                  )),
             ),
-            if (file.caption != null && file.caption!.trim().isNotEmpty) ...[
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(file.caption!, style: TextStyle(
-                    color: AppTheme.textPrimary, fontSize: 16, height: 1.55)),
-              ),
-            ],
-          ]),
+          ),
+          if (file.caption != null && file.caption!.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(file.caption!, style: TextStyle(
+                color: AppTheme.textPrimary, fontSize: 16, height: 1.55)),
+          ],
+        ],
         if (!file.isImage)
           GestureDetector(
             onTap: () async {

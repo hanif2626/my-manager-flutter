@@ -26,6 +26,14 @@ class AppTheme {
   static const _darkInk2     = Color(0xFFA8A8B3);
   static const _darkInk3     = Color(0xFF6E6E78);
 
+  // ── Project design (light grey + matching dark) ──────────
+  // Demo-approved palette: light page is soft grey, cards a touch
+  // lighter; dark page/card match the dark theme's bg/surface.
+  static const _lightPage = Color(0xFFE8EAED);
+  static const _lightCard = Color(0xFFF7F8F9);
+  static const _darkPage  = Color(0xFF121214);
+  static const _darkCard  = Color(0xFF1C1C20);
+
   static const accent = Color(0xFF4F46E5); // single accent — primary actions only
   static const danger = Color(0xFFDC4C4C); // destructive actions only
   // Universal feedback colors — success/warning/error. These are a
@@ -49,6 +57,8 @@ class AppTheme {
   static Color get bg2 => _isDarkMode ? _darkSurface : _lightSurface;
   static Color get bg3 => _isDarkMode ? _darkSurface2 : _lightSurface2;
   static Color get bg4 => _isDarkMode ? _darkSurface2 : _lightSurface2;
+  static Color get page => _isDarkMode ? _darkPage : _lightPage;
+  static Color get card => _isDarkMode ? _darkCard : _lightCard;
   static Color get border => _isDarkMode ? _darkBorder : _lightBorder;
   static Color get textPrimary => _isDarkMode ? _darkInk : _lightInk;
   static Color get textSecondary => _isDarkMode ? _darkInk2 : _lightInk2;

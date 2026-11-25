@@ -248,7 +248,29 @@ class DBHelper {
     final total = ideas.length;
     final done = ideas.where((i) => i['status'] == 'done').length;
     final doing = ideas.where((i) => i['status'] == 'doing').length;
-    return {'total': total, 'done': done, 'doing': doing, 'todo': total - done - doing};
+    final urgent = ideas.where((i) => i['priority'] == 'high' && i['status'] != 'done').length;
+    return {'total': total, 'done': done, 'doing': doing, 'todo': total - done - doing, 'urgent': urgent};
+  }
+
+  /// Per-idea file counts for one project, in a single query — so the
+  /// idea list can show "N টা লেখা/ফাইল" and whether an idea has a
+  /// photo, without loading any file bytes.
+  /// Returns ideaId -> {'count': n, 'hasImage': 0/1}.
+  static Future<Map<int, Map<String, int>>> getIdeaFileMeta(int projectId) async {
+    final d = await db;
+    final rows = await d.rawQuery(
+      "SELECT idea_id, COUNT(*) AS c, "
+      "MAX(CASE WHEN type='image' THEN 1 ELSE 0 END) AS has_image "
+      "FROM idea_files WHERE project_id=? GROUP BY idea_id",
+      [projectId]);
+    final out = <int, Map<String, int>>{};
+    for (final r in rows) {
+      out[r['idea_id'] as int] = {
+        'count': (r['c'] as int?) ?? 0,
+        'hasImage': (r['has_image'] as int?) ?? 0,
+      };
+    }
+    return out;
   }
 
   // ── PROJECT VERSIONS ──────────────────────────────────

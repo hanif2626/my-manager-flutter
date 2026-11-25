@@ -17,6 +17,7 @@ import '../widgets/app_theme.dart';
 import '../services/notification_service.dart';
 import '../services/export_service.dart';
 import 'idea_detail_screen.dart';
+import 'idea_composer_screen.dart';
 import 'project_version_screen.dart';
 import 'file_grid_screen.dart';
 
@@ -45,6 +46,9 @@ class ProjectDetailScreen extends StatefulWidget {
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   List<Idea> _ideas = [];
   Map<String, int> _stats = {'total':0,'done':0,'doing':0,'todo':0};
+  // ideaId -> {'count': ফাইল/লেখার সংখ্যা, 'hasImage': 0/1} — কার্ডে
+  // "N টা লেখা/ফাইল" ও ছবি-চিহ্ন দেখানোর জন্য (ফাইলের বাইট লোড না করেই)।
+  Map<int, Map<String, int>> _fileMeta = {};
   String _filter = 'all';
   String _sort = 'priority';
   bool _loading = true;
@@ -76,9 +80,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     final ideas = await DBHelper.getIdeas(widget.project.id!);
     final stats = await DBHelper.getProjectStats(widget.project.id!);
     final archived = await DBHelper.getArchivedIdeas(widget.project.id!);
+    final fileMeta = await DBHelper.getIdeaFileMeta(widget.project.id!);
     if (mounted) setState(() {
       _ideas = ideas; _stats = stats; _loading = false;
       _archivedCount = archived.length;
+      _fileMeta = fileMeta;
       // clean up selected that no longer exist
       final ids = ideas.map((i) => i.id!).toSet();
       _selected.removeWhere((id) => !ids.contains(id));
@@ -243,530 +249,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     ));
   }
 
-  // ─────────────────────────────────────────────────────────
-  // IDEA FORM — with deadline + file/camera/voice attachment
-  // ─────────────────────────────────────────────────────────
-  Future<void> _showIdeaForm({Idea? idea}) async {
-    final nameCtrl = TextEditingController(text: idea?.title ?? '');
-    final descCtrl = TextEditingController(text: idea?.description ?? '');
-    String priority = idea?.priority ?? 'medium';
-    DateTime? reminder;
-    DateTime? deadline = idea?.deadline != null
-        ? DateTime.fromMillisecondsSinceEpoch(idea!.deadline!)
-        : null;
-    // অতিরিক্ত অপশন (অগ্রাধিকার/Deadline/রিমাইন্ডার/ফাইল) ডিফল্টে
-    // লুকানো থাকে — প্রয়োজন পড়লে ব্যবহারকারী নিজে খুলবেন।
-    // শুধু Deadline আগে থেকে বসানো থাকলে খোলা অবস্থায় আসে।
-    bool moreOpen = idea?.deadline != null;
-
-    final attachments = <_Attachment>[];
-    bool isRecording = false;
-    String? recordPath;
-    // Tracks whether the Save button was actually pressed. If the sheet
-    // gets dismissed any other way (swipe down, tap outside, back
-    // button), whatever was typed still gets saved automatically below —
-    // nothing typed here is ever silently lost.
-    bool savedExplicitly = false;
-    // For a brand-new idea, the very first autosave creates the row and
-    // remembers its id here so later autosaves UPDATE that same row
-    // instead of inserting a new one every time.
-    int? createdIdeaId;
-    bool persisting = false;
-    Timer? debounceTimer;
-
-    /// Writes whatever is currently in the form to the database. Shared
-    /// between the Save button, the periodic autosave-while-typing, and
-    /// the autosave-on-dismiss fallback, so they can never drift out of
-    /// sync.
-    Future<void> persist() async {
-      if (nameCtrl.text.trim().isEmpty || persisting) return;
-      persisting = true;
-      try {
-        final n = now();
-        int ideaId;
-        final existingId = idea?.id ?? createdIdeaId;
-        if (existingId == null) {
-          ideaId = await DBHelper.insertIdea(Idea(
-            projectId: widget.project.id!,
-            title: nameCtrl.text.trim(),
-            description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
-            priority: priority,
-            deadline: deadline?.millisecondsSinceEpoch,
-            createdAt: n, updatedAt: n,
-          ));
-          createdIdeaId = ideaId;
-        } else {
-          ideaId = existingId;
-          await DBHelper.updateIdea(Idea(
-            id: ideaId,
-            projectId: widget.project.id!,
-            title: nameCtrl.text.trim(),
-            description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
-            status: idea?.status ?? 'todo',
-            priority: priority,
-            isArchived: idea?.isArchived ?? 0,
-            deadline: deadline?.millisecondsSinceEpoch,
-            createdAt: idea?.createdAt ?? n,
-            updatedAt: n,
-          ));
-        }
-
-        if (reminder != null && reminder!.isAfter(DateTime.now())) {
-          await NotificationService.scheduleNotification(
-            ideaId + 1000, '💡 ${nameCtrl.text.trim()}',
-            'এই আইডিয়ার কাজ করার সময় হয়েছে!', reminder!,
-          );
-        }
-
-        // Attachments only need writing once, the first time they're
-        // present — repeat autosaves would otherwise re-attach the same
-        // files over and over.
-        if (attachments.isNotEmpty) {
-          for (final a in attachments) {
-            await DBHelper.insertFile(IdeaFile(
-              ideaId: ideaId, projectId: widget.project.id!,
-              name: a.name, type: a.type,
-              content: a.content, createdAt: n, updatedAt: n,
-            ));
-          }
-          attachments.clear();
-        }
-      } finally {
-        persisting = false;
-      }
-    }
-
-    /// Debounced autosave while typing — protects against the app itself
-    /// getting closed or killed mid-edit, not just the sheet being
-    /// dismissed. Fires 1.5s after the last keystroke.
-    void scheduleAutosave() {
-      debounceTimer?.cancel();
-      debounceTimer = Timer(const Duration(milliseconds: 1500), persist);
-    }
-    nameCtrl.addListener(scheduleAutosave);
-    descCtrl.addListener(scheduleAutosave);
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppTheme.bg2,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) {
-
-          Future<void> startRecording() async {
-            final hasPermission = await _recorder.hasPermission();
-            if (!hasPermission) return;
-            final dir = await getTemporaryDirectory();
-            recordPath = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-            await _recorder.start(const RecordConfig(), path: recordPath!);
-            setS(() => isRecording = true);
-          }
-
-          Future<void> stopRecording() async {
-            final path = await _recorder.stop();
-            setS(() => isRecording = false);
-            if (path != null) {
-              final bytes = await File(path).readAsBytes();
-              final b64 = base64Encode(bytes);
-              final name = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-              setS(() => attachments.add(_Attachment(name: name, type: 'audio', content: b64)));
-            }
-          }
-
-          Future<void> pickImage(ImageSource source) async {
-            final picked = await BubblePicker.pickImage(source: source, imageQuality: 85);
-            if (picked == null) return;
-            final bytes = await picked.readAsBytes();
-            final b64 = base64Encode(bytes);
-            final ext = picked.name.split('.').last.toLowerCase();
-            final name = picked.name.toLowerCase().contains('icon')
-                ? picked.name : 'image_${attachments.length + 1}.$ext';
-            setS(() => attachments.add(_Attachment(name: name, type: 'image', content: b64)));
-          }
-
-          Future<void> pickFile() async {
-            final result = await BubblePicker.pickFiles(
-                type: FileType.any, allowMultiple: true, withData: true);
-            if (result == null) return;
-            for (final pf in result.files) {
-              final bytes = pf.bytes ?? (pf.path != null
-                  ? await File(pf.path!).readAsBytes() : null);
-              if (bytes == null) continue;
-              final dummy = IdeaFile(ideaId: 0, projectId: 0,
-                  name: pf.name, type: 'binary', createdAt: 0, updatedAt: 0);
-              final isText = dummy.isText;
-              final content = isText
-                  ? utf8.decode(bytes, allowMalformed: true)
-                  : base64Encode(bytes);
-              setS(() => attachments.add(_Attachment(
-                  name: pf.name, type: isText ? 'text' : 'binary', content: content)));
-            }
-          }
-
-          return Padding(
-            padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                  Center(child: Container(width: 40, height: 4,
-                      decoration: BoxDecoration(color: AppTheme.border,
-                          borderRadius: BorderRadius.circular(2)))),
-                  const SizedBox(height: 12),
-
-                  Row(children: [
-                    Text(idea == null ? '💡 নতুন আইডিয়া' : '✏️ আইডিয়া এডিট',
-                        style:  TextStyle(color: AppTheme.textPrimary,
-                            fontSize: 17, fontWeight: FontWeight.w700)),
-                    const Spacer(),
-                    if (idea != null)
-                      GestureDetector(
-                        onTap: () {
-                          final text = [idea.title,
-                            if (idea.description != null && idea.description!.isNotEmpty)
-                              idea.description!,
-                          ].join('\n\n');
-                          Clipboard.setData(ClipboardData(text: text));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                               SnackBar(content: Text('টেক্সট কপি হয়েছে! ✅'),
-                                  backgroundColor: AppTheme.green,
-                                  duration: Duration(seconds: 1)));
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(color: AppTheme.bg3,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppTheme.border)),
-                          child:  Row(children: [
-                            Icon(Icons.copy_outlined, size: 13, color: AppTheme.textSecondary),
-                            SizedBox(width: 4),
-                            Text('কপি', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                          ]),
-                        ),
-                      ),
-                  ]),
-                  const SizedBox(height: 14),
-
-                  _field(nameCtrl, 'আইডিয়ার শিরোনাম *'),
-                  const SizedBox(height: 10),
-                  _field(descCtrl, 'বিবরণ (ঐচ্ছিক)...', maxLines: 3),
-                  const SizedBox(height: 12),
-
-                  // ── আরও অপশন (ডিফল্টে লুকানো) ──────────────
-                  GestureDetector(
-                    onTap: () => setS(() => moreOpen = !moreOpen),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bg3,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppTheme.border),
-                      ),
-                      child: Row(children: [
-                        Icon(Icons.tune_outlined, size: 16, color: AppTheme.textSecondary),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text('আরও অপশন — অগ্রাধিকার, Deadline, রিমাইন্ডার, ফাইল',
-                            style: TextStyle(color: AppTheme.textSecondary,
-                                fontSize: 12.5, fontWeight: FontWeight.w600))),
-                        Icon(moreOpen ? Icons.expand_less : Icons.expand_more,
-                            size: 18, color: AppTheme.textMuted),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  if (moreOpen) ...[
-                  // Priority
-                   Text('অগ্রাধিকার:', style: TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  Row(children: ['high','medium','low'].map((k) {
-                    final cfg = priorityConfig[k]!;
-                    final sel = priority == k;
-                    return Expanded(child: Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: GestureDetector(
-                        onTap: () => setS(() => priority = k),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.symmetric(vertical: 9),
-                          decoration: BoxDecoration(
-                            color: sel ? AppTheme.accent.withOpacity(0.15) : AppTheme.bg3,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: sel ? AppTheme.accent : AppTheme.border,
-                                width: sel ? 2 : 1),
-                          ),
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(cfg['icon'] as IconData, size: 16,
-                                color: sel ? AppTheme.accent : AppTheme.textSecondary),
-                            const SizedBox(height: 3),
-                            Text(cfg['label'] as String,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: sel ? AppTheme.accent : AppTheme.textSecondary,
-                                    fontSize: 12, fontWeight: FontWeight.w600)),
-                          ]),
-                        ),
-                      ),
-                    ));
-                  }).toList()),
-                  const SizedBox(height: 12),
-
-                  // ── DEADLINE ────────────────────────────────
-                   Text('Deadline:', style: TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  GestureDetector(
-                    onTap: () async {
-                      final d = await showDatePicker(
-                        context: ctx,
-                        initialDate: deadline ?? DateTime.now().add(const Duration(days: 1)),
-                        firstDate: DateTime.now().subtract(const Duration(days: 1)),
-                        lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
-                        builder: (c, child) => Theme(
-                          data: ThemeData.dark().copyWith(colorScheme:
-                           ColorScheme.dark(primary: Color(0xFFEF4444), surface: AppTheme.bg3)),
-                          child: child!,
-                        ),
-                      );
-                      if (d != null) setS(() => deadline = d);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bg3,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: deadline != null ? const Color(0xFFEF4444) : AppTheme.border,
-                            width: deadline != null ? 1.5 : 1),
-                      ),
-                      child: Row(children: [
-                        Icon(Icons.event_outlined,
-                            color: deadline != null ? const Color(0xFFEF4444) : AppTheme.textMuted,
-                            size: 18),
-                        const SizedBox(width: 10),
-                        Text(
-                          deadline != null
-                              ? '${deadline!.day}/${deadline!.month}/${deadline!.year} (deadline)'
-                              : 'Deadline বেছে নাও (ঐচ্ছিক)',
-                          style: TextStyle(
-                              color: deadline != null ? AppTheme.textPrimary : AppTheme.textMuted,
-                              fontSize: 13),
-                        ),
-                        const Spacer(),
-                        if (deadline != null)
-                          GestureDetector(
-                              onTap: () => setS(() => deadline = null),
-                              child:  Icon(Icons.close, color: AppTheme.textMuted, size: 16)),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Reminder
-                   Text('রিমাইন্ডার:', style: TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  GestureDetector(
-                    onTap: () async {
-                      final d = await showDatePicker(
-                        context: ctx,
-                        initialDate: DateTime.now().add(const Duration(days: 1)),
-                        firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(const Duration(days: 365)),
-                        builder: (c, child) => Theme(
-                          data: ThemeData.dark().copyWith(colorScheme:
-                           ColorScheme.dark(primary: AppTheme.accent, surface: AppTheme.bg3)),
-                          child: child!,
-                        ),
-                      );
-                      if (d == null || !ctx.mounted) return;
-                      final t = await showTimePicker(
-                        context: ctx,
-                        initialTime: const TimeOfDay(hour: 9, minute: 0),
-                        builder: (c, child) => Theme(
-                          data: ThemeData.dark().copyWith(colorScheme:
-                           ColorScheme.dark(primary: AppTheme.accent, surface: AppTheme.bg3)),
-                          child: child!,
-                        ),
-                      );
-                      if (t == null) return;
-                      setS(() => reminder = DateTime(d.year, d.month, d.day, t.hour, t.minute));
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                      decoration: BoxDecoration(
-                        color: AppTheme.bg3,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: reminder != null ? AppTheme.accent : AppTheme.border,
-                            width: reminder != null ? 1.5 : 1),
-                      ),
-                      child: Row(children: [
-                        Icon(Icons.alarm,
-                            color: reminder != null ? AppTheme.accent : AppTheme.textMuted,
-                            size: 18),
-                        const SizedBox(width: 10),
-                        Text(
-                          reminder != null
-                              ? '${reminder!.day}/${reminder!.month}/${reminder!.year} ${reminder!.hour}:${reminder!.minute.toString().padLeft(2,'0')}'
-                              : 'তারিখ ও সময় বেছে নাও',
-                          style: TextStyle(
-                              color: reminder != null ? AppTheme.textPrimary : AppTheme.textMuted,
-                              fontSize: 13),
-                        ),
-                        const Spacer(),
-                        if (reminder != null)
-                          GestureDetector(
-                              onTap: () => setS(() => reminder = null),
-                              child:  Icon(Icons.close, color: AppTheme.textMuted, size: 16)),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Attachments
-                   Text('ফাইল / ছবি / ভয়েস:', style: TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    _attachBtn(icon: Icons.attach_file_outlined, label: 'ফাইল',
-                        color: AppTheme.accent, onTap: pickFile),
-                    const SizedBox(width: 8),
-                    _attachBtn(icon: Icons.photo_library_outlined, label: 'গ্যালারি',
-                        color: AppTheme.green, onTap: () => pickImage(ImageSource.gallery)),
-                    const SizedBox(width: 8),
-                    _attachBtn(icon: Icons.camera_alt_outlined, label: 'ক্যামেরা',
-                        color: AppTheme.yellow, onTap: () => pickImage(ImageSource.camera)),
-                    const SizedBox(width: 8),
-                    Expanded(child: GestureDetector(
-                      onTap: () => isRecording ? stopRecording() : startRecording(),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isRecording ? AppTheme.red.withOpacity(0.15) : AppTheme.bg3,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                              color: isRecording ? AppTheme.red : AppTheme.border,
-                              width: isRecording ? 2 : 1),
-                        ),
-                        child: Column(children: [
-                          Icon(isRecording ? Icons.stop_circle : Icons.mic_outlined,
-                              color: isRecording ? AppTheme.red : AppTheme.textMuted, size: 20),
-                          const SizedBox(height: 3),
-                          Text(isRecording ? 'Stop' : 'ভয়েস',
-                              style: TextStyle(
-                                  color: isRecording ? AppTheme.red : AppTheme.textMuted,
-                                  fontSize: 10, fontWeight: FontWeight.w600)),
-                        ]),
-                      ),
-                    )),
-                  ]),
-
-                  if (attachments.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    ...attachments.asMap().entries.map((entry) {
-                      final i = entry.key; final a = entry.value;
-                      final icon = a.type == 'image' ? Icons.image_outlined
-                          : a.type == 'audio' ? Icons.mic
-                          : Icons.insert_drive_file_outlined;
-                      final color = a.type == 'image' ? AppTheme.green
-                          : a.type == 'audio' ? AppTheme.red : AppTheme.accent;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(color: AppTheme.bg3,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: color.withOpacity(0.3))),
-                        child: Row(children: [
-                          Icon(icon, color: color, size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(a.name,
-                              style:  TextStyle(color: AppTheme.textPrimary,
-                                  fontSize: 12, fontFamily: 'monospace'),
-                              overflow: TextOverflow.ellipsis)),
-                          GestureDetector(
-                            onTap: () => setS(() => attachments.removeAt(i)),
-                            child:  Icon(Icons.close, color: AppTheme.textMuted, size: 16),
-                          ),
-                        ]),
-                      );
-                    }),
-                  ],
-                  ], // if (moreOpen)
-
-                  const SizedBox(height: 8),
-                      ],
-                    ),
-                  ),
-                ),
-                // ── স্টিকি সেভ/আপডেট বাটন — স্ক্রল কলামের বাইরে,
-                // তাই কিবোর্ড উঠলেও সবসময় উপরে ভেসে থাকে। ──
-                Container(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.bg2,
-                    border: Border(top: BorderSide(color: AppTheme.border)),
-                  ),
-                  child: SizedBox(width: double.infinity, child: ElevatedButton.icon(
-                    onPressed: () async {
-                      if (nameCtrl.text.trim().isEmpty) return;
-                      await persist();
-                      savedExplicitly = true;
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      _load();
-                    },
-                    icon: Icon(idea == null ? Icons.add : Icons.check, size: 18, color: Colors.white),
-                    label: Text(
-                      idea == null
-                          ? 'আইডিয়া যোগ করো' + (attachments.isNotEmpty ? ' (${attachments.length} ফাইল)' : '')
-                          : 'আপডেট করো',
-                      style: const TextStyle(color: Colors.white,
-                          fontWeight: FontWeight.w700, fontSize: 15),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.accent,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  )),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+  // ── IDEA COMPOSER ──────────────────────────────────────
+  // আগের bottom-sheet ফর্মের বদলে এখন পূর্ণ-পাতার লেখার পাতা
+  // (idea_composer_screen.dart): শিরোনাম + লেখা + ছবি/ফাইল +
+  // অবস্থা/অগ্রাধিকার/Deadline এক পাতায়, অটো-সেভসহ।
+  Future<void> _openComposer({Idea? idea}) async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+          builder: (_) => IdeaComposerScreen(project: widget.project, idea: idea)),
     );
-
-    debounceTimer?.cancel();
-    nameCtrl.removeListener(scheduleAutosave);
-    descCtrl.removeListener(scheduleAutosave);
-
-    // The sheet is gone now — if it was dismissed any way other than the
-    // Save button (swiped down, tapped outside, back button, or the app
-    // itself getting closed/backgrounded mid-edit), don't lose what was
-    // typed. Auto-save it as if Save had been pressed.
-    if (!savedExplicitly && nameCtrl.text.trim().isNotEmpty) {
-      await persist();
-      _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('📝 খসড়া স্বয়ংক্রিয়ভাবে সেভ হয়েছে'),
-          backgroundColor: AppTheme.accent,
-          duration: Duration(seconds: 2),
-        ));
-      }
-    }
+    if (changed == true) _load();
   }
 
   void _copyIdea(Idea idea) {
@@ -947,7 +440,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     final todayCount = _ideas.where((i) => i.isDueToday && i.status != 'done').length;
 
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.page,
       appBar: AppBar(
         title: _selectMode
             ? Text('${_selected.length} selected',
@@ -1036,7 +529,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         // Stats
         Container(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-          color: AppTheme.bg2,
+          color: AppTheme.card,
           child: Column(children: [
             Row(children: [
               _statBox('মোট', total.toString(), AppTheme.textSecondary),
@@ -1060,7 +553,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         ),
         // Filter chips
         Container(
-          color: AppTheme.bg2,
+          color: AppTheme.page,
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -1097,9 +590,33 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
             itemBuilder: (_, i) => _ideaCard(sorted[i]),
           ),
         ),
+        // Wide add button — ডেমোর "+ নতুন আইডিয়া লিখুন"।
+        if (!_selectMode)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+            child: GestureDetector(
+              onTap: () => _openComposer(),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: AppTheme.card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.border, width: 1.5),
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.add, size: 20, color: AppTheme.textSecondary),
+                  const SizedBox(width: 6),
+                  Text('নতুন আইডিয়া লিখুন',
+                      style: TextStyle(color: AppTheme.textSecondary,
+                          fontSize: 15, fontWeight: FontWeight.w700)),
+                ]),
+              ),
+            ),
+          ),
       ]),
       floatingActionButton: _selectMode ? null : FloatingActionButton.extended(
-        onPressed: () => _showIdeaForm(),
+        onPressed: () => _openComposer(),
         backgroundColor: AppTheme.accent,
         icon: const Icon(Icons.lightbulb_outline, color: Colors.white),
         label: const Text('💡 আইডিয়া', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
@@ -1143,6 +660,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     );
   }
 
+  // ডেমোর চিপ: বাছা হলে গাঢ় পটভূমি + হালকা লেখা, না হলে
+  // কার্ড-রঙের পটভূমি। দুই মোডেই একইভাবে মেলে।
   Widget _filterChip(String value, String label, Color color) {
     final sel = _filter == value;
     return Padding(
@@ -1150,14 +669,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       child: GestureDetector(
         onTap: () => setState(() => _filter = value),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           decoration: BoxDecoration(
-            color: sel ? color.withOpacity(0.15) : AppTheme.bg3,
+            color: sel ? AppTheme.textPrimary : AppTheme.card,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: sel ? color : AppTheme.border),
+            border: Border.all(color: sel ? AppTheme.textPrimary : AppTheme.border),
           ),
           child: Text(label, style: TextStyle(
-              color: sel ? color : AppTheme.textSecondary,
+              color: sel ? AppTheme.page : AppTheme.textSecondary,
               fontSize: 12, fontWeight: FontWeight.w600)),
         ),
       ),
@@ -1172,14 +691,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         onTap: () => setState(() => _filter = value),
         child: Stack(clipBehavior: Clip.none, children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
             decoration: BoxDecoration(
-              color: sel ? color.withOpacity(0.15) : AppTheme.bg3,
+              color: sel ? AppTheme.textPrimary : AppTheme.card,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: sel ? color : (count > 0 ? color.withOpacity(0.5) : AppTheme.border)),
+              border: Border.all(color: sel ? AppTheme.textPrimary : (count > 0 ? color.withOpacity(0.5) : AppTheme.border)),
             ),
             child: Text(label, style: TextStyle(
-                color: sel ? color : (count > 0 ? color : AppTheme.textSecondary),
+                color: sel ? AppTheme.page : (count > 0 ? color : AppTheme.textSecondary),
                 fontSize: 12, fontWeight: FontWeight.w600)),
           ),
           if (count > 0)
@@ -1202,7 +721,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     final pc = priorityConfig[idea.priority]!;
     final isSelected = _selected.contains(idea.id);
     final isOverdue = idea.isOverdue;
-    final isDueToday = idea.isDueToday;
+    final meta = idea.id != null ? _fileMeta[idea.id!] : null;
+    final fileCount = meta?['count'] ?? 0;
+    final hasImage = (meta?['hasImage'] ?? 0) == 1;
+    final created = DateTime.fromMillisecondsSinceEpoch(idea.createdAt);
+    final dateStr = '${created.day}/${created.month}/${created.year}';
 
     return GestureDetector(
       onLongPress: () {
@@ -1211,10 +734,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
           _toggleSelect(idea);
         }
       },
-      child: Card(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
             color: isSelected
                 ? AppTheme.accent
                 : isOverdue
@@ -1224,7 +748,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
           ),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           onTap: () async {
             if (_selectMode) {
               _toggleSelect(idea);
@@ -1235,99 +759,116 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
             _load();
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(children: [
-              // Select checkbox OR status circle
-              if (_selectMode)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.accent.withOpacity(0.2) : AppTheme.bg3,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: isSelected ? AppTheme.accent : AppTheme.border, width: 2),
-                  ),
-                  child: isSelected
-                      ? const Icon(Icons.check, size: 18, color: AppTheme.accent)
-                      : null,
-                )
-              else
-                GestureDetector(
-                  onTap: () {
-                    const next = {'todo':'doing','doing':'done','done':'todo'};
-                    _updateStatus(idea, next[idea.status]!);
-                  },
-                  child: Container(
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(
-                      color: AppTheme.bg3,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.border, width: 2),
-                    ),
-                    child: Icon(
-                      idea.status=='done' ? Icons.check_rounded
-                          : idea.status=='doing' ? Icons.timelapse_rounded
-                          : Icons.radio_button_unchecked_rounded,
-                      size: 18, color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ),
-              const SizedBox(width: 10),
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    Expanded(child: Text(idea.title,
-                        style: TextStyle(
-                            color: idea.status=='done' ? AppTheme.textMuted : AppTheme.textPrimary,
-                            fontSize: 14, fontWeight: FontWeight.w600,
-                            decoration: idea.status=='done' ? TextDecoration.lineThrough : null),
-                        maxLines: 2, overflow: TextOverflow.ellipsis)),
-                    if (!_selectMode)
-                      GestureDetector(
-                        onTap: () => _copyIdea(idea),
-                        child: Container(
-                          margin: const EdgeInsets.only(left: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(color: AppTheme.bg3,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppTheme.border)),
-                          child:  Icon(Icons.copy_outlined,
-                              size: 18, color: AppTheme.textSecondary),
-                        ),
-                      ),
-                  ]),
-                  if (idea.description != null && idea.description!.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(idea.description!, style:  TextStyle(
-                        color: AppTheme.textSecondary, fontSize: 12),
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
-                  ],
-                  const SizedBox(height: 6),
-                  Wrap(spacing: 6, runSpacing: 4, children: [
-                    _badge(pc['label'] as String, pc['color'] as Color),
-                    _badge(sc['label'] as String, sc['color'] as Color),
-                    // Deadline badge
-                    if (idea.deadline != null)
-                      _deadlineBadge(idea),
-                  ]),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                _statusPill(idea.status),
+                const SizedBox(width: 6),
+                _miniChip(pc['icon'] as IconData, pc['label'] as String),
+                if (idea.deadline != null) ...[
+                  const SizedBox(width: 6),
+                  _deadlineBadge(idea),
                 ],
-              )),
-              if (!_selectMode) ...[
-                const SizedBox(width: 8),
-                Column(children: [
-                  _actionBtn(Icons.edit_outlined, AppTheme.accent,
-                          () => _showIdeaForm(idea: idea)),
-                  const SizedBox(height: 6),
-                  _actionBtn(Icons.delete_outline, AppTheme.red, () => _delete(idea)),
-                ]),
+                const Spacer(),
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  icon: Icon(Icons.more_vert, size: 18, color: AppTheme.textMuted),
+                  color: AppTheme.bg2,
+                  onSelected: (v) {
+                    if (v == 'edit') _openComposer(idea: idea);
+                    if (v == 'copy') _copyIdea(idea);
+                    if (v == 'delete') _delete(idea);
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'edit', child: Row(children: [
+                      Icon(Icons.edit_outlined, size: 16, color: AppTheme.textSecondary),
+                      const SizedBox(width: 8),
+                      const Text('এডিট'),
+                    ])),
+                    PopupMenuItem(value: 'copy', child: Row(children: [
+                      Icon(Icons.copy_outlined, size: 16, color: AppTheme.textSecondary),
+                      const SizedBox(width: 8),
+                      const Text('কপি'),
+                    ])),
+                    PopupMenuItem(value: 'delete', child: Row(children: [
+                      Icon(Icons.delete_outline, size: 16, color: AppTheme.danger),
+                      const SizedBox(width: 8),
+                      Text('মুছো', style: TextStyle(color: AppTheme.danger)),
+                    ])),
+                  ],
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Text(idea.title,
+                  style: TextStyle(
+                      color: idea.status == 'done' ? AppTheme.textMuted : AppTheme.textPrimary,
+                      fontSize: 17, fontWeight: FontWeight.w700, height: 1.35,
+                      decoration: idea.status == 'done' ? TextDecoration.lineThrough : null),
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
+              if (idea.description != null && idea.description!.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(idea.description!,
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.75),
+                    maxLines: 3, overflow: TextOverflow.ellipsis),
               ],
+              const SizedBox(height: 10),
+              Row(children: [
+                Text(dateStr, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                const SizedBox(width: 8),
+                Text('·', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                const SizedBox(width: 8),
+                if (hasImage) ...[
+                  Icon(Icons.image_outlined, size: 13, color: AppTheme.textMuted),
+                  const SizedBox(width: 4),
+                ],
+                Text(fileCount > 0 ? '$fileCount টা লেখা/ফাইল' : 'শুধু লেখা',
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                const Spacer(),
+                if (isSelected)
+                  Icon(Icons.check_circle, size: 18, color: AppTheme.accent),
+              ]),
             ]),
           ),
         ),
       ),
     );
   }
+
+  Widget _statusPill(String status) {
+    final cfg = statusConfig[status]!;
+    final isDone = status == 'done';
+    final isDoing = status == 'doing';
+    final bg = isDone
+        ? AppTheme.green.withOpacity(0.12)
+        : isDoing
+            ? AppTheme.yellow.withOpacity(0.12)
+            : AppTheme.bg3;
+    final fg = isDone
+        ? AppTheme.green
+        : isDoing
+            ? AppTheme.yellow
+            : AppTheme.textSecondary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(cfg['icon'] as IconData, size: 12, color: fg),
+        const SizedBox(width: 4),
+        Text(cfg['label'] as String,
+            style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+
+  Widget _miniChip(IconData icon, String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+    decoration: BoxDecoration(color: AppTheme.bg3, borderRadius: BorderRadius.circular(999)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 12, color: AppTheme.textSecondary),
+      const SizedBox(width: 4),
+      Text(label, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
+    ]),
+  );
 
   Widget _deadlineBadge(Idea idea) {
     final d = DateTime.fromMillisecondsSinceEpoch(idea.deadline!);
@@ -1443,9 +984,4 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
     ),
   );
-}
-
-class _Attachment {
-  final String name, type, content;
-  _Attachment({required this.name, required this.type, required this.content});
 }

@@ -130,9 +130,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bg,
+      backgroundColor: AppTheme.page,
       appBar: AppBar(
-        backgroundColor: AppTheme.bg2,
+        backgroundColor: AppTheme.page,
         title: Row(children: [
           const Text('📓', style: TextStyle(fontSize: 20)),
           const SizedBox(width: 8),
@@ -205,32 +205,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
           : _projects.isEmpty ? _emptyState()
-              : ReorderableListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                  itemCount: _projects.length,
-                  proxyDecorator: (child, index, animation) => Material(
-                    color: Colors.transparent,
-                    elevation: 8,
-                    shadowColor: Colors.black45,
-                    borderRadius: BorderRadius.circular(12),
-                    child: child,
+              : Column(children: [
+                  Expanded(
+                    child: ReorderableListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      itemCount: _projects.length,
+                      proxyDecorator: (child, index, animation) => Material(
+                        color: Colors.transparent,
+                        elevation: 8,
+                        shadowColor: Colors.black45,
+                        borderRadius: BorderRadius.circular(12),
+                        child: child,
+                      ),
+                      onReorder: (oldIndex, newIndex) async {
+                        if (newIndex > oldIndex) newIndex--;
+                        setState(() {
+                          final item = _projects.removeAt(oldIndex);
+                          _projects.insert(newIndex, item);
+                        });
+                        for (int i = 0; i < _projects.length; i++) {
+                          await DBHelper.updateProjectOrder(_projects[i].id!, i);
+                        }
+                      },
+                      itemBuilder: (_, i) => Padding(
+                        key: ValueKey(_projects[i].id),
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _projectCard(_projects[i]),
+                      ),
+                    ),
                   ),
-                  onReorder: (oldIndex, newIndex) async {
-                    if (newIndex > oldIndex) newIndex--;
-                    setState(() {
-                      final item = _projects.removeAt(oldIndex);
-                      _projects.insert(newIndex, item);
-                    });
-                    for (int i = 0; i < _projects.length; i++) {
-                      await DBHelper.updateProjectOrder(_projects[i].id!, i);
-                    }
-                  },
-                  itemBuilder: (_, i) => Padding(
-                    key: ValueKey(_projects[i].id),
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _projectCard(_projects[i]),
+                  // Wide add button — ডেমোর "+ নতুন প্রজেক্ট"।
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: GestureDetector(
+                      onTap: () async {
+                        await Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const ProjectFormScreen()));
+                        _load();
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: AppTheme.card,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.border, width: 1.5),
+                        ),
+                        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.add, size: 20, color: AppTheme.textSecondary),
+                          const SizedBox(width: 6),
+                          Text('নতুন প্রজেক্ট',
+                              style: TextStyle(color: AppTheme.textSecondary,
+                                  fontSize: 15, fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
+                    ),
                   ),
-                ),
+                ]),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           await Navigator.push(context,
@@ -329,111 +360,135 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _projectCard(Project p) {
-    final st = _stats[p.id] ?? {'total':0,'done':0,'doing':0,'todo':0};
+    final st = _stats[p.id] ?? {'total':0,'done':0,'doing':0,'todo':0,'urgent':0};
     final total = st['total']!;
     final done = st['done']!;
+    final urgent = st['urgent'] ?? 0;
     final progress = total > 0 ? done / total : 0.0;
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.border),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         onTap: () => _openProject(p),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                // Monogram avatar — project identity by initial letter,
-                // not by a color assignment.
-                Container(
-                  width: 34, height: 34,
-                  decoration: BoxDecoration(
-                    color: AppTheme.bg3, shape: BoxShape.circle,
-                    border: Border.all(color: AppTheme.border),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    p.name.isNotEmpty ? p.name.substring(0, 1).toUpperCase() : '?',
-                    style: TextStyle(color: AppTheme.textSecondary,
-                        fontWeight: FontWeight.w800, fontSize: 14),
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              // Monogram avatar — project identity by initial letter,
+              // not by a color assignment (app design system).
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.bg3, shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.border),
                 ),
-                const SizedBox(width: 10),
-                Expanded(child: Row(children: [
-                  Flexible(child: Text(p.name, style: AppTheme.title(),
-                      overflow: TextOverflow.ellipsis)),
-                  if (p.isLocked) ...[
-                    const SizedBox(width: 6),
-                    Icon(Icons.lock_outline, size: 14, color: AppTheme.textMuted),
-                  ],
-                ])),
-                // Edit & Copy — the two most-used actions, kept visible.
-                _iconBtn(Icons.edit_outlined, () async {
-                  await Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => ProjectFormScreen(project: p)));
-                  _load();
-                }, tooltip: 'এডিট'),
-                const SizedBox(width: 4),
-                _iconBtn(Icons.copy_outlined, () => _duplicate(p),
-                    tooltip: 'কপি'),
-                const SizedBox(width: 4),
-                // Delete — tucked into a menu so it can't be tapped by accident.
-                PopupMenuButton<String>(
-                  padding: EdgeInsets.zero,
-                  icon: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(color: AppTheme.bg3,
-                        borderRadius: BorderRadius.circular(8)),
-                    child:  Icon(Icons.more_vert, size: 16, color: AppTheme.textMuted),
-                  ),
-                  color: AppTheme.bg2,
-                  onSelected: (v) {
-                    if (v == 'delete') _delete(p);
-                    if (v == 'lock') _toggleLock(p);
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(value: 'lock', child: Row(children: [
-                      Icon(p.isLocked ? Icons.lock_open_outlined : Icons.lock_outline,
-                          size: 18, color: AppTheme.textSecondary),
-                      const SizedBox(width: 10),
-                      Text(p.isLocked ? 'লক খোলো' : 'লক করো',
-                          style: TextStyle(color: AppTheme.textSecondary)),
-                    ])),
-                    PopupMenuItem(value: 'delete', child: Row(children: [
-                      Icon(Icons.delete_outline, size: 18, color: AppTheme.danger),
-                      const SizedBox(width: 10),
-                      Text('মুছে ফেলো', style: TextStyle(color: AppTheme.danger)),
-                    ])),
-                  ],
-                ),
-              ]),
-              if (p.description != null && p.description!.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(p.description!, style: AppTheme.body(),
-                    maxLines: 2, overflow: TextOverflow.ellipsis),
-              ],
-              const SizedBox(height: 12),
-              ClipRRect(borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: progress, minHeight: 5,
-                  backgroundColor: AppTheme.bg3,
-                  valueColor: AlwaysStoppedAnimation(AppTheme.textMuted),
+                alignment: Alignment.center,
+                child: Text(
+                  p.name.isNotEmpty ? p.name.substring(0, 1).toUpperCase() : '?',
+                  style: TextStyle(color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w800, fontSize: 15),
                 ),
               ),
-              const SizedBox(height: 10),
-              Row(children: [
-                _statChip(Icons.radio_button_unchecked, '${st['todo']}'),
-                const SizedBox(width: 12),
-                _statChip(Icons.incomplete_circle_outlined, '${st['doing']}'),
-                const SizedBox(width: 12),
-                _statChip(Icons.check_circle_outline, '${st['done']}'),
-                const Spacer(),
-                Text('${(progress * 100).round()}%', style: AppTheme.caption(
-                    weight: FontWeight.w700, color: AppTheme.textSecondary)),
-              ]),
+              const SizedBox(width: 10),
+              Expanded(child: Row(children: [
+                Flexible(child: Text(p.name, style: AppTheme.title(),
+                    overflow: TextOverflow.ellipsis)),
+                if (p.isLocked) ...[
+                  const SizedBox(width: 6),
+                  Icon(Icons.lock_outline, size: 14, color: AppTheme.textMuted),
+                ],
+              ])),
+              PopupMenuButton<String>(
+                padding: EdgeInsets.zero,
+                icon: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(color: AppTheme.bg3,
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Icon(Icons.more_vert, size: 16, color: AppTheme.textMuted),
+                ),
+                color: AppTheme.bg2,
+                onSelected: (v) async {
+                  if (v == 'edit') {
+                    await Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => ProjectFormScreen(project: p)));
+                    _load();
+                  }
+                  if (v == 'copy') _duplicate(p);
+                  if (v == 'lock') _toggleLock(p);
+                  if (v == 'delete') _delete(p);
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'edit', child: Row(children: [
+                    Icon(Icons.edit_outlined, size: 16, color: AppTheme.textSecondary),
+                    const SizedBox(width: 10),
+                    const Text('এডিট'),
+                  ])),
+                  PopupMenuItem(value: 'copy', child: Row(children: [
+                    Icon(Icons.copy_outlined, size: 16, color: AppTheme.textSecondary),
+                    const SizedBox(width: 10),
+                    const Text('কপি'),
+                  ])),
+                  PopupMenuItem(value: 'lock', child: Row(children: [
+                    Icon(p.isLocked ? Icons.lock_open_outlined : Icons.lock_outline,
+                        size: 16, color: AppTheme.textSecondary),
+                    const SizedBox(width: 10),
+                    Text(p.isLocked ? 'লক খোলো' : 'লক করো'),
+                  ])),
+                  PopupMenuItem(value: 'delete', child: Row(children: [
+                    Icon(Icons.delete_outline, size: 16, color: AppTheme.danger),
+                    const SizedBox(width: 10),
+                    Text('মুছে ফেলো', style: TextStyle(color: AppTheme.danger)),
+                  ])),
+                ],
+              ),
             ]),
-          ),
-        ]),
+            if (p.description != null && p.description!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(p.description!, style: AppTheme.body(),
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
+            ],
+            const SizedBox(height: 12),
+            ClipRRect(borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress, minHeight: 5,
+                backgroundColor: AppTheme.bg3,
+                valueColor: AlwaysStoppedAnimation(AppTheme.textMuted),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Text('$total আইডিয়া', style: AppTheme.caption()),
+              const SizedBox(width: 6),
+              Text('·', style: AppTheme.caption()),
+              const SizedBox(width: 6),
+              Text('$done শেষ', style: AppTheme.caption()),
+              const SizedBox(width: 6),
+              Text('·', style: AppTheme.caption()),
+              const SizedBox(width: 6),
+              Text('${st['todo']} বাকি', style: AppTheme.caption()),
+              const Spacer(),
+              if (urgent > 0) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                      color: AppTheme.red.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(999)),
+                  child: Text('জরুরি $urgent টা',
+                      style: TextStyle(color: AppTheme.red, fontSize: 11,
+                          fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Text('${(progress * 100).round()}%', style: AppTheme.caption(
+                  weight: FontWeight.w700, color: AppTheme.textSecondary)),
+            ]),
+          ]),
+        ),
       ),
     );
   }
