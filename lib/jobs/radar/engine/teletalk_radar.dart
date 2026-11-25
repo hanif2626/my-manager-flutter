@@ -1,13 +1,39 @@
 import '../radar_models.dart';
 import 'bn_util.dart';
+import 'circular_parser.dart' show parseArea;
+import 'districts.dart' show districtsIn;
 import 'match_engine.dart';
 import 'teletalk_source.dart';
 
-/// তালিকা থেকে আমাদের টার্গেট পদগুলো (মেয়াদ বাকি, সাঁটলিপি নয়)।
+/// Teletalk-এ সার্কুলারের পুরো টেক্সট থাকে না (শর্ত PDF-এ), তাই এলাকা-যাচাই শুধু
+/// পদ/প্রতিষ্ঠানের নামে স্পষ্ট শর্ত থাকলেই হয়। এছাড়া জেলা প্রশাসকের কার্যালয় ও
+/// জেলা পরিষদের নিয়োগ সংশ্লিষ্ট জেলার স্থায়ী বাসিন্দাদের জন্যই হয় — অন্য জেলার
+/// হলে বাদ।
+RadarCheck? _teletalkArea(TeletalkJob j, RadarProfile profile) {
+  if (profile.district.isEmpty) return null;
+  final hay = '${j.titleBn} ${j.titleEn} ${j.orgName} ${j.orgNameBn} ${j.shortName}';
+  final area = areaCheckFor(parseArea(hay), profile.district);
+  if (area != null) return area;
+  final orgHay = '${j.orgName} ${j.orgNameBn} ${j.shortName}';
+  if (RegExp(r'জেলা\s*প্রশাসকের\s*কার্যালয়|জেলা\s*পরিষদ|district\s*commissioner|zila\s*parishad', caseSensitive: false)
+      .hasMatch(orgHay)) {
+    final named = districtsIn(orgHay);
+    if (named.isNotEmpty && !named.contains(profile.district)) {
+      return RadarCheck(
+          key: 'area',
+          s: 'fail',
+          msg: 'এলাকা: অন্য জেলার জেলা প্রশাসক/জেলা পরিষদের নিয়োগ — সংশ্লিষ্ট জেলার বাসিন্দাদের জন্য');
+    }
+  }
+  return null;
+}
+
+/// তালিকা থেকে আমাদের টার্গেট পদগুলো (মেয়াদ বাকি, সাঁটলিপি নয়, এলাকায় বাদ নয়)।
 List<TeletalkJob> pickTeletalkTargets(List<TeletalkJob> jobs, RadarProfile profile, {DateTime? now}) {
   final today = todayDhaka(now);
   return jobs.where((j) {
     if (j.deadline != null && daysBetween(today, j.deadline!) < 0) return false;
+    if (_teletalkArea(j, profile)?.s == 'fail') return false;
     return postRelevance('${j.titleBn} ${j.titleEn}', profile) == 'yes';
   }).toList();
 }
@@ -61,6 +87,8 @@ List<RadarItem> teletalkItems(
         RadarCheck(key: 'post', s: 'ok', msg: 'পদের নাম মিলেছে: ${j.titleEn}'),
         if (age != null) age else const RadarCheck(key: 'age', s: 'warn', msg: 'বয়সসীমা আনা যায়নি — বিজ্ঞপ্তিতে দেখো'),
       ];
+      final area = _teletalkArea(j, profile);
+      if (area != null && area.s == 'ok') checks.add(area);
       if (j.published != null && daysBetween(today, j.published!) > 0) {
         checks.add(RadarCheck(key: 'start', s: 'warn', msg: 'আবেদন শুরু: ${fmtDateBn(j.published!)} (এখনো শুরু হয়নি)'));
       }

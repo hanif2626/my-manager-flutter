@@ -30,7 +30,7 @@ class RadarRunner {
   static const _kState = 'radar_runner_state';
   static const _kRunning = 'radar_running_at';
   static const _maxFetch = 25;
-  static const _engineVersion = 3; // যাচাই-নিয়ম বদলালে বাড়াই — পুরনো ফলাফল আবার যাচাই হবে
+  static const _engineVersion = 4; // যাচাই-নিয়ম বদলালে বাড়াই — পুরনো ফলাফল আবার যাচাই হবে (৪: এলাকা-শর্ত)
 
   static String _today() => Reminder.ymd(DateTime.now());
 

@@ -54,6 +54,7 @@ const multi = '''<h2>এক নজরে</h2><table><tr><td>প্রতিষ�
 
 void main() {
   roundupTests();
+  areaTests();
   test('পরিকল্পনা কমিশন: ডাটা এন্ট্রি, HSC, ২০/২০ → সম্ভাব্য যোগ্য', () {
     final r = evaluate(htmlToText(planning), profile, now: july15, title: 'পরিকল্পনা কমিশন');
     expect(r.expired, false);
@@ -125,5 +126,73 @@ void roundupTests() {
     final r = evaluate('কম্পিউটার অপারেটর ... অনেক বিজ্ঞপ্তির তালিকা', profile,
         now: oct13, title: 'সাপ্তাহিক চাকরির খবর পত্রিকা ১৬ অক্টোবর ২০২৬ PDF সহ | Saptahik Chakrir Khobor 2026');
     expect(r.verdict, 'none');
+  });
+}
+
+// ── এলাকা-শর্ত: স্থায়ী জেলা জয়পুরহাট ──
+
+final profileJ = RadarProfile(
+  dob: DateTime.utc(1999, 1, 1),
+  eduRank: 4,
+  eduLabel: 'স্নাতক (পাস কোর্স, ৩ বছর)',
+  typingBn: 20,
+  typingEn: 20,
+  targetKeywords: profile.targetKeywords,
+  excludeKeywords: profile.excludeKeywords,
+  district: 'joypurhat',
+);
+
+String _circ(String areaLine) => '''এক নজরে
+প্রতিষ্ঠানের নাম | পরীক্ষা অফিস |
+আবেদনের শেষ তারিখ | ৩০ নভেম্বর ২০২৬ |
+১. কম্পিউটার অপারেটর (৫ টি পদ)
+এইচএসসি পাশ। বাংলায় ২০ শব্দ ও ইংরেজিতে ২০ শব্দ গতি।
+শর্ত: $areaLine
+বয়স: ০১.০৯.২০২৬ তারিখে ১৮-৩২ বছর''';
+
+void areaTests() {
+  test('এলাকা পার্সার: বাদ/শুধু/সকল', () {
+    var a = parseArea('রাজশাহী, নাটোর ও পাবনা জেলার প্রার্থীগণ আবেদন করতে পারবেন না।');
+    expect(a.excluded, {'rajshahi', 'natore', 'pabna'});
+    a = parseArea('শুধুমাত্র ঢাকা জেলার স্থায়ী বাসিন্দাগণ আবেদন করতে পারবেন।');
+    expect(a.only, {'dhaka'});
+    a = parseArea('সকল জেলার প্রার্থীগণ আবেদন করতে পারবেন।');
+    expect(a.allOpen, true);
+    expect(a.only.isEmpty, true);
+    a = parseArea('ঢাকা জেলার প্রার্থীগণ ব্যতীত অন্য কোনো জেলার প্রার্থী আবেদন করতে পারবেন না।');
+    expect(a.only, {'dhaka'});
+    expect(a.excluded.isEmpty, true);
+    a = parseArea('পার্বত্য জেলাসমূহ ব্যতীত সকল জেলার প্রার্থীগণ আবেদন করতে পারবেন।');
+    expect(a.excluded, {'bandarban', 'rangamati', 'khagrachhari'});
+    a = parseArea('পরীক্ষা ঢাকায় অনুষ্ঠিত হবে।');
+    expect(a.hasInfo, false);
+  });
+
+  test('শুধু অন্য জেলার সার্কুলার → fail (সামনে আসবে না)', () {
+    final r = evaluate(_circ('শুধুমাত্র ঢাকা জেলার স্থায়ী বাসিন্দাগণ আবেদন করতে পারবেন।'), profileJ, now: oct13);
+    expect(r.verdict, 'fail');
+    expect(r.posts.first.checks.firstWhere((c) => c.key == 'area').s, 'fail');
+  });
+
+  test('নিজের জেলা বাদ দেওয়া সার্কুলার → fail', () {
+    final r = evaluate(_circ('জয়পুরহাট জেলা ব্যতীত সকল জেলার প্রার্থীগণ আবেদন করতে পারবেন।'), profileJ, now: oct13);
+    expect(r.verdict, 'fail');
+  });
+
+  test('সকল জেলার সার্কুলার → এলাকায় ✅', () {
+    final r = evaluate(_circ('সকল জেলার প্রার্থীগণ আবেদন করতে পারবেন।'), profileJ, now: oct13);
+    expect(r.verdict, isNot('fail'));
+    expect(r.posts.first.checks.firstWhere((c) => c.key == 'area').s, 'ok');
+  });
+
+  test('নিজের বিভাগের সার্কুলার → এলাকায় ✅', () {
+    final r = evaluate(_circ('শুধু রাজশাহী বিভাগের জেলাসমূহের প্রার্থীগণ আবেদন করতে পারবেন।'), profileJ, now: oct13);
+    expect(r.verdict, isNot('fail'));
+    expect(r.posts.first.checks.firstWhere((c) => c.key == 'area').s, 'ok');
+  });
+
+  test('জেলা সিলেক্ট করা না থাকলে এলাকা-যাচাই নেই', () {
+    final r = evaluate(_circ('শুধুমাত্র ঢাকা জেলার স্থায়ী বাসিন্দাগণ আবেদন করতে পারবেন।'), profile, now: oct13);
+    expect(r.posts.first.checks.any((c) => c.key == 'area'), false);
   });
 }

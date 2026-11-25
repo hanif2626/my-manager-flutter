@@ -1,4 +1,5 @@
 import 'bn_util.dart';
+import 'districts.dart';
 
 /// সামারি টেবিলের সারি "লেবেল | মান |" থেকে মান।
 String field(String text, String label) {
@@ -149,4 +150,96 @@ EduInfo parseEducation(String rawText) {
   int? required;
   if (levels.isNotEmpty) required = levels.reduce((a, b) => a < b ? a : b);
   return EduInfo(required, flags);
+}
+
+/// পদভিত্তিক ব্লক বাদ দিয়ে বাকি টেক্সট (সামারি + সাধারণ শর্ত) — সার্কুলার-জোড়া শর্ত
+/// (যেমন এলাকা) পদ-ব্লকের শর্তের সাথে গুলিয়ে ফেলা ঠেকাতে। ব্লক না থাকলে পুরো টেক্সটই।
+String stripPostBlocks(String text) {
+  final out = <String>[];
+  var inBlock = false;
+  var sawBlock = false;
+  for (final raw in text.split('\n')) {
+    final l = toEn(raw);
+    if (_postHead.hasMatch(l)) {
+      inBlock = true;
+      sawBlock = true;
+      continue;
+    }
+    if (inBlock && RegExp(r'^##\s').hasMatch(l)) inBlock = false;
+    if (!inBlock) out.add(raw);
+  }
+  return sawBlock ? out.join('\n') : text;
+}
+
+// ── এলাকা-শর্ত ──
+
+/// সার্কুলারের এলাকা-শর্ত: কোন জেলা বাদ, কোন জেলার জন্যই শুধু, নাকি সকল জেলার জন্য খোলা।
+class AreaInfo {
+  final Set<String> excluded; // বাদ দেওয়া জেলার কী
+  final Set<String> only; // শুধু এই জেলাগুলোর জন্য (খালি = এমন শর্ত পাওয়া যায়নি)
+  final bool allOpen; // "সকল জেলা" বলা আছে
+  const AreaInfo(this.excluded, this.only, this.allOpen);
+  bool get hasInfo => excluded.isNotEmpty || only.isNotEmpty || allOpen;
+}
+
+final _exclMark = RegExp(
+    r'ব্যতীত|বাদে|ছাড়া|ব্যতিরেকে|আবেদন\s*করতে\s*পারবেন\s*না|আবেদন\s*করতে\s*পারবে\s*না|যোগ্য\s*নন|যোগ্য\s*হবেন\s*না|প্রযোজ্য\s*নয়|except|excluding',
+    caseSensitive: false);
+final _exclFlip = RegExp(r'(ব্যতীত|বাদে|ছাড়া)\s*(অন্য|অন্যান্য|আর\s*কোনো|আর\s*কেউ)');
+final _onlyWord = RegExp(r'শুধু|শুধুমাত্র|কেবল|কেবলমাত্র|\bonly\b', caseSensitive: false);
+final _resident = RegExp(r'স্থায়ী\s*বাসিন্দা|স্থায়ীভাবে\s*বসবাস|permanent\s*resident', caseSensitive: false);
+final _eligibleVerb = RegExp(r'আবেদন\s*করতে\s*পারবেন|আবেদন\s*করতে\s*পারবে|আবেদনের\s*যোগ্য|আবেদন\s*করিতে\s*পারিবেন');
+final _mustBe = RegExp(r'হতে\s*হবে|হইতে\s*হইবে');
+final _allOpenRe = RegExp(r'সকল\s*জেলা|সব\s*জেলা|সমগ্র\s*বাংলাদেশ|সারাদেশ|সারা\s*দেশ|all\s*districts', caseSensitive: false);
+final _areaCtx = RegExp(r'জেলা|প্রার্থী|আবেদন|বাসিন্দা|যোগ্য|district', caseSensitive: false);
+
+/// টেক্সট থেকে এলাকা-শর্ত। শুধু স্পষ্ট শর্তেই ধরে — জেলার নাম থাকলেই নয়
+/// (যেমন "ঢাকায় পরীক্ষা হবে" এলাকা-শর্ত নয়)। বাক্য ধরে ধরে দেখা হয়।
+AreaInfo parseArea(String rawText) {
+  final excluded = <String>{};
+  final only = <String>{};
+  var allOpen = false;
+  for (final seg in rawText.split(RegExp(r'[\n।;]'))) {
+    final s = seg.trim();
+    if (s.isEmpty) continue;
+    // "রাজশাহী বিভাগ" থাকলে সেটা বিভাগের শর্ত — জেলা খোঁজার আগে ওই অংশ সরিয়ে নিই,
+    // নইলে বিভাগের নামের জেলাটা একাই ধরা পড়ত।
+    final divs = divisionsIn(s);
+    var rest = s;
+    for (final d in divs) {
+      rest = rest.replaceAll(RegExp('${RegExp.escape(d.bn)}\\s*বিভাগ'), ' ');
+      rest = rest.replaceAll(RegExp(r'\b' + RegExp.escape(d.en) + r'\s+division\b', caseSensitive: false), ' ');
+    }
+    final named = <String>{
+      ...districtsIn(rest),
+      for (final d in divs) ...districtsOfDivision(d.key),
+    };
+    final segAllOpen = _allOpenRe.hasMatch(s);
+    if (segAllOpen && divs.isEmpty) allOpen = true;
+    if (_exclMark.hasMatch(s) && _areaCtx.hasMatch(s)) {
+      if (s.contains('পার্বত্য')) excluded.addAll(hillDistricts);
+      // "ঢাকা জেলার প্রার্থী ব্যতীত অন্যরা আবেদন করতে পারবেন না" মানে শুধু ঢাকা — বাদ নয়।
+      if (_exclFlip.hasMatch(s)) {
+        only.addAll(named);
+      } else {
+        excluded.addAll(named);
+      }
+      continue;
+    }
+    if (named.isEmpty) continue;
+    final hasOnly = _onlyWord.hasMatch(s);
+    final hasRes = _resident.hasMatch(s);
+    final hasVerb = _eligibleVerb.hasMatch(s);
+    if (hasOnly && (hasRes || hasVerb || s.contains('জেলা') || divs.isNotEmpty)) {
+      only.addAll(named);
+    } else if (hasRes && (hasVerb || _mustBe.hasMatch(s))) {
+      only.addAll(named);
+    } else if (hasVerb && divs.isNotEmpty) {
+      only.addAll(named);
+    } else if (hasVerb && !segAllOpen && (s.contains('জেলার') || s.contains('জেলাসমূহের'))) {
+      only.addAll(named);
+    }
+  }
+  only.removeAll(excluded); // একই জেলা দুই তালিকায় থাকলে "বাদ"ই জেতে
+  return AreaInfo(excluded, only, allOpen);
 }

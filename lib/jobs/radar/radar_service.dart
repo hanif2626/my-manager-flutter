@@ -22,11 +22,12 @@ class RadarService {
   static const _kBgLog = 'radar_bg_log'; // ব্যাকগ্রাউন্ড চেকের শেষ কয়েকটা ফলাফল (সমস্যা ধরতে)
   static const kKwInclude = 'radar_kw_include'; // JSON তালিকা — যে পদগুলো খুঁজবে
   static const kKwExclude = 'radar_kw_exclude'; // JSON তালিকা — যেগুলো বাদ
+  static const kDistrict = 'radar_district'; // স্থায়ী জেলার কী (districts.dart); খালি = সিলেক্ট করা নেই
   static const _kCache = 'radar_cache';
   static const _kDismissed = 'radar_dismissed';
 
   /// ব্যাকআপে যাবে এমন কী।
-  static const backupKeys = [kDob, kEdu, kSubject, kTypBn, kTypEn, kDaily, kReportTime, kInstant, kDeadline, kKwInclude, kKwExclude, 'admit_watch_on', 'radar_starred', 'job_tags', 'big_hiring_threshold', 'big_hiring_words'];
+  static const backupKeys = [kDob, kEdu, kSubject, kTypBn, kTypEn, kDaily, kReportTime, kInstant, kDeadline, kKwInclude, kKwExclude, kDistrict, 'admit_watch_on', 'radar_starred', 'job_tags', 'big_hiring_threshold', 'big_hiring_words'];
 
   static const eduLevels = <String, String>{
     'ssc': 'এসএসসি / সমমান',
@@ -43,6 +44,10 @@ class RadarService {
   static String get subject => SettingsService.getString(kSubject);
   static int get typingBn => int.tryParse(SettingsService.getString(kTypBn)) ?? 20;
   static int get typingEn => int.tryParse(SettingsService.getString(kTypEn)) ?? 20;
+
+  /// স্থায়ী জেলা (কী) — জব প্রোফাইল থেকে সিলেক্ট করা; খালি হলে এলাকা-যাচাই হয় না।
+  static String get district => SettingsService.getString(kDistrict);
+  static Future<void> setDistrict(String key) => SettingsService.setString(kDistrict, key);
 
   // ── রাতের রিপোর্ট ──
   static bool get dailyOn => SettingsService.getString(kDaily, defaultValue: '1') != '0';
@@ -128,6 +133,7 @@ class RadarService {
       typingEn: typingEn,
       targetKeywords: keywords,
       excludeKeywords: excludeTerms.map(termToPattern).toList(),
+      district: district,
     );
   }
 

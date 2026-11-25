@@ -194,7 +194,7 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
               child: Text(_showHidden ? 'লুকানো বাদ দাও' : 'লুকানো ${bn(_hidden.length)}টি'),
             ),
           IconButton(
-            tooltip: 'আমার জব প্রোফাইল (ট্যাগ)',
+            tooltip: 'আমার জব প্রোফাইল (জেলা, ট্যাগ)',
             icon: Icon(Icons.badge_outlined, color: AppTheme.textSecondary),
             onPressed: () async {
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const JobProfileScreen()));

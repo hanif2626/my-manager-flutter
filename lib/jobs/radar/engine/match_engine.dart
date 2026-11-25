@@ -1,6 +1,7 @@
 import '../radar_models.dart';
 import 'bn_util.dart';
 import 'circular_parser.dart';
+import 'districts.dart';
 
 /// রাডারের জন্য ব্যবহারকারীর প্রোফাইল।
 class RadarProfile {
@@ -12,6 +13,7 @@ class RadarProfile {
   final int typingEn;
   final List<String> targetKeywords;
   final List<String> excludeKeywords;
+  final String district; // স্থায়ী জেলার কী (districts.dart); খালি = সিলেক্ট করা নেই, এলাকা-যাচাই হবে না
   const RadarProfile({
     required this.dob,
     required this.eduRank,
@@ -21,6 +23,7 @@ class RadarProfile {
     required this.typingEn,
     required this.targetKeywords,
     required this.excludeKeywords,
+    this.district = '',
   });
 }
 
@@ -76,6 +79,24 @@ RadarCheck _ok(String k, String m) => RadarCheck(key: k, s: 'ok', msg: m);
 RadarCheck _warn(String k, String m) => RadarCheck(key: k, s: 'warn', msg: m);
 RadarCheck _fail(String k, String m) => RadarCheck(key: k, s: 'fail', msg: m);
 
+/// এলাকা-শর্তের সাথে ব্যবহারকারীর জেলা মেলানো। জেলা সিলেক্ট করা না থাকলে বা
+/// সার্কুলারে এলাকা-শর্ত না থাকলে null (কোনো যাচাই দেখানো হয় না)।
+RadarCheck? areaCheckFor(AreaInfo info, String districtKey) {
+  if (districtKey.isEmpty || !info.hasInfo) return null;
+  final name = districtByKey(districtKey)?.bn ?? districtKey;
+  if (info.excluded.contains(districtKey)) {
+    return _fail('area', 'এলাকা: $name জেলা বাদ দেওয়া হয়েছে — আবেদন করা যাবে না');
+  }
+  if (info.only.isNotEmpty && !info.only.contains(districtKey)) {
+    final names = info.only.map((k) => districtByKey(k)?.bn ?? k).toList()..sort();
+    final shown = names.length <= 4 ? names.join(', ') : '${names.take(4).join(', ')} ইত্যাদি';
+    return _fail('area', 'এলাকা: শুধু $shown জেলার জন্য — তোমার জেলা $name নয়');
+  }
+  if (info.only.contains(districtKey)) return _ok('area', 'এলাকা: $name জেলার জন্য খোলা');
+  if (info.excluded.isNotEmpty) return _ok('area', 'এলাকা: $name জেলা বাদ পড়েনি');
+  return _ok('area', 'এলাকা: সকল জেলার জন্য খোলা');
+}
+
 /// "সাপ্তাহিক চাকরির খবর" ধরনের সংকলন/পত্রিকা-পোস্ট — আসল সার্কুলার নয়।
 final _roundup = RegExp(r'চাকরির\s*খবর|চাকরির\s*ডাক|সাপ্তাহিক|দৈনিক\s*পত্রিকা|পত্রিকা\s*(?:থেকে|সহ)|newspaper|chakrir\s*khobor|saptahik', caseSensitive: false);
 
@@ -121,11 +142,18 @@ EvalResult evaluate(String text, RadarProfile profile, {String? title, DateTime?
     posts = [ParsedPost(title, null, '')];
   }
 
+  // এলাকা — সার্কুলার-জোড়া শর্ত (পদ-ব্লকের বাইরের অংশ থেকে); পদভিত্তিক শর্ত নিচে আলাদা দেখা হয়।
+  final circArea = areaCheckFor(parseArea(stripPostBlocks(text)), profile.district);
+
   final evaluated = <RadarPost>[];
   for (final p in posts) {
     final rel = postRelevance(p.title, profile);
     if (rel == 'no') continue;
     final checks = <RadarCheck>[ageCheck];
+
+    final postArea = p.text.trim().isEmpty ? null : areaCheckFor(parseArea(p.text), profile.district);
+    final area = postArea?.s == 'fail' ? postArea : (circArea?.s == 'fail' ? circArea : (postArea ?? circArea));
+    if (area != null) checks.add(area);
 
     if (rel == 'shorthand') {
       evaluated.add(RadarPost(
@@ -181,14 +209,18 @@ EvalResult evaluate(String text, RadarProfile profile, {String? title, DateTime?
   }
 
   // নিরাপত্তা-জাল: পদ আলাদা করা না গেলেও পেজে টার্গেট শব্দ থাকলে "যাচাই বাকি" — যেন কিছু মিস না হয়।
+  // তবে এলাকায় বাদ পড়লে এই জালেও আসবে না (এলাকা fail হলে verdict fail)।
   if (evaluated.isEmpty && _any(profile.targetKeywords, text)) {
+    final area = areaCheckFor(parseArea(text), profile.district);
+    final checks = <RadarCheck>[
+      ageCheck,
+      if (area != null) area,
+      _warn('parse', 'পেজে কম্পিউটার অপারেটর/ডাটা এন্ট্রি-জাতীয় শব্দ আছে, কিন্তু পদভিত্তিক শর্ত আলাদা করতে পারিনি — মূল বিজ্ঞপ্তি দেখো'),
+    ];
     evaluated.add(RadarPost(
       title: (title == null || title.isEmpty) ? 'সার্কুলার' : title,
-      verdict: 'warn',
-      checks: [
-        ageCheck,
-        _warn('parse', 'পেজে কম্পিউটার অপারেটর/ডাটা এন্ট্রি-জাতীয় শব্দ আছে, কিন্তু পদভিত্তিক শর্ত আলাদা করতে পারিনি — মূল বিজ্ঞপ্তি দেখো'),
-      ],
+      verdict: area?.s == 'fail' ? 'fail' : 'warn',
+      checks: checks,
     ));
   }
 

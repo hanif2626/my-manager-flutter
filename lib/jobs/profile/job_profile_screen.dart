@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../reminder/models/reminder.dart' show bn;
 import '../../widgets/app_theme.dart';
+import '../radar/engine/districts.dart';
+import '../radar/radar_runner.dart';
 import '../radar/radar_service.dart';
 import 'big_hiring.dart';
 import 'job_tags.dart';
 
-/// আমার জব প্রোফাইল। এখন: 🏷️ ট্যাগ (সার্কুলার ফিল্টার/অগ্রাধিকারের জন্য)।
+/// আমার জব প্রোফাইল। এখন: 📍 স্থায়ী জেলা (এলাকা-শর্তের ফিল্টার), 🏷️ ট্যাগ, 📌 বড় নিয়োগ।
 /// আবেদন-ফর্মের মতো ব্যক্তিগত তথ্যের ঘরগুলো পরের ধাপে এই স্ক্রিনেই আলাদা অংশ হিসেবে যোগ হবে।
 class JobProfileScreen extends StatefulWidget {
   const JobProfileScreen({super.key});
@@ -17,6 +19,7 @@ class _JobProfileScreenState extends State<JobProfileScreen> {
   List<JobTag> _tags = [];
   List<String> _bigWords = [];
   int _bigThr = BigHiring.defaultThreshold;
+  String _district = '';
 
   @override
   void initState() {
@@ -24,11 +27,116 @@ class _JobProfileScreenState extends State<JobProfileScreen> {
     _tags = JobTags.all();
     _bigWords = List.of(BigHiring.words);
     _bigThr = BigHiring.threshold;
+    _district = RadarService.district;
   }
 
   Future<void> _save() async {
     await JobTags.saveAll(_tags);
     if (mounted) setState(() {});
+  }
+
+  Future<void> _pickDistrict() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.bg2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        var q = '';
+        return StatefulBuilder(builder: (ctx, setS) {
+          final query = q.trim().toLowerCase();
+          bool matches(BdDistrict d) =>
+              query.isEmpty || d.bn.contains(q.trim()) || d.en.toLowerCase().contains(query);
+          return Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.72,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('স্থায়ী জেলা সিলেক্ট করো',
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 10),
+                TextField(
+                  onChanged: (v) => setS(() => q = v),
+                  decoration: InputDecoration(
+                    hintText: 'জেলার নাম খোঁজো…',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Expanded(
+                  child: ListView(children: [
+                    ListTile(
+                      leading: const Icon(Icons.public),
+                      title: const Text('কোনোটিই নয় — সব সার্কুলার দেখাও'),
+                      trailing: _district.isEmpty ? Icon(Icons.check, color: AppTheme.accent) : null,
+                      onTap: () => Navigator.pop(ctx, ''),
+                    ),
+                    for (final div in bdDivisions)
+                      if (bdDistricts.any((d) => d.division == div.key && matches(d))) ...[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                          child: Text('${div.bn} বিভাগ',
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 12.5, fontWeight: FontWeight.w700)),
+                        ),
+                        for (final d in bdDistricts.where((d) => d.division == div.key && matches(d)))
+                          ListTile(
+                            title: Text(d.bn),
+                            subtitle: Text(d.en, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                            trailing: _district == d.key ? Icon(Icons.check, color: AppTheme.accent) : null,
+                            onTap: () => Navigator.pop(ctx, d.key),
+                          ),
+                      ],
+                  ]),
+                ),
+              ]),
+            ),
+          );
+        });
+      },
+    );
+    if (picked == null || picked == _district) return;
+    await RadarService.setDistrict(picked);
+    await RadarRunner.markStale(); // পরের খোঁজায় নতুন জেলার নিয়মে আবার যাচাই হবে
+    if (!mounted) return;
+    setState(() => _district = picked);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(picked.isEmpty
+            ? 'জেলা সিলেকশন বাদ — এখন সব সার্কুলারই আসবে'
+            : '${districtByKey(picked)?.bn} সেভ হয়েছে — রাডারে রিফ্রেশ চাপলেই নতুন নিয়মে যাচাই হবে')));
+  }
+
+  Widget _districtCard() {
+    final d = districtByKey(_district);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.bg2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('📍 স্থায়ী ঠিকানা (জেলা)', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Text(
+          'তোমার স্থায়ী জেলা সিলেক্ট করে রাখো। যে সার্কুলারে তোমার জেলা বাদ দেওয়া হয়েছে, '
+          'বা যেটা শুধু অন্য জেলার জন্য — সেগুলো রাডারে আসবে না।',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5, height: 1.45),
+        ),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+            child: Text(
+              d == null ? 'এখনো সিলেক্ট করা নেই — সব সার্কুলারই দেখাচ্ছে' : '${d.bn} (${d.en})',
+              style: TextStyle(
+                  color: d == null ? AppTheme.textMuted : AppTheme.textPrimary, fontWeight: FontWeight.w700),
+            ),
+          ),
+          TextButton(onPressed: _pickDistrict, child: Text(d == null ? 'সিলেক্ট করো' : 'বদলাও')),
+        ]),
+      ]),
+    );
   }
 
   /// এখন ফিডে ট্যাগটা কয়টা সার্কুলারে মেলে — শব্দ ঠিক আছে কি না যাচাই করতে।
@@ -256,6 +364,7 @@ class _JobProfileScreenState extends State<JobProfileScreen> {
         label: const Text('নতুন ট্যাগ'),
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 100), children: [
+        _districtCard(),
         _bigHiringCard(),
         Container(
           padding: const EdgeInsets.all(14),
