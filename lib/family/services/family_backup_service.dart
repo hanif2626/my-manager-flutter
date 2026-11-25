@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import '../../services/additive_merge.dart';
 import '../../services/drive_service.dart';
 import '../db/family_db.dart';
 import '../models/family_models.dart';
@@ -43,7 +44,9 @@ class FamilyBackupService {
       final drive = DriveService.instance;
       if (!drive.isSignedIn) return;
       try {
-        final r = await drive.backupJson(fileName, await _exportJson());
+        // Additive: Drive-এর আগের কপির সাথে মার্জ করে তবে আপলোড।
+        final r = await drive.backupJson(fileName, await _exportJson(),
+            merge: AdditiveMerge.mergeFamily);
         if (r == DriveBackupResult.success) lastBackupAt = DateTime.now();
       } catch (_) {}
     });
@@ -58,7 +61,8 @@ class FamilyBackupService {
 
   static Future<DriveBackupResult> backupNow() async {
     if (!await _ensureDrive()) return DriveBackupResult.notSignedIn;
-    final r = await DriveService.instance.backupJson(fileName, await _exportJson());
+    final r = await DriveService.instance.backupJson(fileName, await _exportJson(),
+        merge: AdditiveMerge.mergeFamily);
     if (r == DriveBackupResult.success) lastBackupAt = DateTime.now();
     return r;
   }

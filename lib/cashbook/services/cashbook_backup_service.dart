@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import '../../services/additive_merge.dart';
 import '../../services/drive_service.dart';
 import '../../services/safety_net.dart';
 import '../db/cashbook_db.dart';
@@ -38,7 +39,9 @@ class CashbookBackupService {
       try {
         final drive = DriveService.instance;
         if (await drive.ensureSignedIn()) {
-          final result = await drive.backupJson(_fileName, await _json());
+          // Additive: Drive-এর আগের কপির সাথে মার্জ করে তবে আপলোড।
+        final result = await drive.backupJson(_fileName, await _json(),
+            merge: AdditiveMerge.mergeCashbook);
           if (result == DriveBackupResult.success) lastBackupAt = DateTime.now();
         }
       } catch (_) {
@@ -54,7 +57,8 @@ class CashbookBackupService {
   static Future<DriveBackupResult> backupNow() async {
     final drive = DriveService.instance;
     if (!await drive.ensureSignedIn(interactive: true)) return DriveBackupResult.notSignedIn;
-    final r = await drive.backupJson(_fileName, await _json());
+    final r = await drive.backupJson(_fileName, await _json(),
+        merge: AdditiveMerge.mergeCashbook);
     if (r == DriveBackupResult.success) lastBackupAt = DateTime.now();
     return r;
   }

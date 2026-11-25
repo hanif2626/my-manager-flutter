@@ -483,10 +483,28 @@ class _BackupCenterScreenState extends State<BackupCenterScreen> {
     final text = ms == 0
         ? '🤖 অটো-ব্যাকআপ চালু — এখনো প্রথম রান হয়নি'
         : '🤖 শেষ অটো-ব্যাকআপ: ${_ago(DateTime.fromMillisecondsSinceEpoch(ms))} — ${AutoBackup.lastDetail}';
-    return Text(text,
-        style: TextStyle(
-            color: AutoBackup.lastOk || ms == 0 ? AppTheme.textMuted : AppTheme.red,
-            fontSize: 12));
+    // Additive হিসাব: শেষ রানে Drive-এর আগের কত অক্ষত থাকল + ফোন থেকে
+    // কত নতুন যোগ হলো — ব্যবহারকারী চোখে দেখে নিশ্চিত হতে পারবেন।
+    final add = AutoBackup.additiveSummary;
+    final addLine = add.isEmpty
+        ? null
+        : '⬆️ শেষ ব্যাকআপে: ${add.entries.map((e) => '${e.key} ${bn(e.value.kept)} অক্ষত + ${bn(e.value.added)} নতুন').join(' • ')}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(text,
+            style: TextStyle(
+                color: AutoBackup.lastOk || ms == 0
+                    ? AppTheme.textMuted
+                    : AppTheme.red,
+                fontSize: 12)),
+        if (addLine != null) ...[
+          const SizedBox(height: 2),
+          Text(addLine,
+              style: TextStyle(color: AppTheme.green, fontSize: 12)),
+        ],
+      ],
+    );
   }
 
   Widget _accountCard(bool signedIn, String? email) {

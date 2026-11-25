@@ -9,9 +9,16 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../db/db_helper.dart';
+import 'additive_merge.dart';
 import 'bubble_window.dart';
 import 'settings_service.dart';
 import 'safety_net.dart';
+
+/// লোকাল + Drive-এর আগের ব্যাকআপের মার্জ ফাংশন — AdditiveMerge-এর
+/// mergeMain/mergeCashbook/… থেকে আসে। null ফেরত দেওয়া যাবে না;
+/// মার্জ ফাংশন কখনো এক্সেপশন ছুঁড়লে কলার আপলোড করবে না।
+typedef BackupMerger = AdditiveMergeResult Function(
+    Map<String, dynamic> local, Map<String, dynamic> remote);
 
 class GoogleAuthClient extends http.BaseClient {
   final Map<String, String> _headers;
@@ -47,6 +54,10 @@ class DriveService {
 
   /// শেষ মার্জ-রিস্টোরের হিসাব (নতুন যোগ, আপডেট, আগের মতো) — UI-তে দেখাতে।
   ({int added, int updated, int kept})? lastRestoreCounts;
+
+  /// শেষ additive-ব্যাকআপের হিসাব (Drive-এর আগেরটা কত অক্ষত + ফোন থেকে
+  /// কত নতুন যোগ/আপডেট) — AutoBackup এটা পড়ে Backup Center-এ দেখায়।
+  AdditiveCounts? lastAdditiveCounts;
 
   final _googleSignIn = GoogleSignIn(scopes: [drive.DriveApi.driveFileScope]);
   drive.DriveApi? _driveApi;
@@ -177,8 +188,11 @@ class DriveService {
 
       // Export all data as JSON
       final jsonData = await _exportAllDataAsJson();
-      // ফাঁকা/অনেক ছোট ডেটা দিয়ে Drive-এর ভালো ব্যাকআপ ঢেকে ফেলা ঠেকানো — _uploadGuarded দেখো
-      return await _uploadGuarded('mymanager_backup.json', jsonData);
+      // Additive (২০২৬-১১-২৫): Drive-এর আগের কপির সাথে মার্জ করে তবে
+      // আপলোড — ফোনে কিছু মুছে গেলেও Drive-এর পুরনো ডেটা বাঁচে।
+      // ফাঁকা/অনেক ছোট ডেটা দিয়ে ভালো ব্যাকআপ ঢাকা ঠেকানো — _uploadGuarded দেখো।
+      return await backupJson('mymanager_backup.json', jsonData,
+          merge: AdditiveMerge.mergeMain);
     } catch (e) {
       lastError = e.toString();
       debugPrint('DriveService backup error: $e');
@@ -327,27 +341,138 @@ class DriveService {
   // একসাথে দুটো ব্যাকআপ চললে দুটোই "ফাইল নেই" দেখে দুটো ফাইল বানিয়ে ফেলত; তাই লাইনে দাঁড় করানো।
   Future<void> _backupQueue = Future.value();
 
-  Future<DriveBackupResult> backupJson(String fileName, String jsonData) {
-    final run = _backupQueue.then((_) => _backupJsonNow(fileName, jsonData));
+  /// Additive ব্যাকআপের মূল পথ (২০২৬-১১-২৫ — ওভাররাইট নয়)।
+  /// [merge] দিলে: Drive-এর আগের ফাইলটা নামিয়ে লোকালের সাথে মার্জ করে
+  /// তবে আপলোড করে — আগের ডেটা অক্ষত থাকে, নতুনটা শুধু যোগ হয়।
+  /// [merge] না দিলে আগের মতো সরাসরি আপলোড (শুধু ভল্ট ব্যবহার করে —
+  /// ভল্টের মার্জ ডিক্রিপ্ট করে আগেই করা হয়)।
+  /// Fail-safe: আগের ফাইল নামানো/পড়া না গেলে, বা মার্জে ত্রুটি হলে,
+  /// আপলোড হয় না — পুরনো ভালো ব্যাকআপ অন্ধভাবে ঢাকা হয় না।
+  Future<DriveBackupResult> backupJson(String fileName, String jsonData,
+      {BackupMerger? merge}) {
+    final run =
+        _backupQueue.then((_) => _backupJsonNow(fileName, jsonData, merge: merge));
     _backupQueue = run.then((_) {}, onError: (_) {});
     return run;
   }
 
-  Future<DriveBackupResult> _backupJsonNow(String fileName, String jsonData) async {
+  Future<DriveBackupResult> _backupJsonNow(String fileName, String jsonData,
+      {BackupMerger? merge}) async {
     if (!await ensureSignedIn()) return DriveBackupResult.notSignedIn;
     try {
       lastError = null;
+      lastAdditiveCounts = null;
       await _initApi();
       _backupFolderId ??= await _ensureFolder();
       if (_backupFolderId == null) {
         lastError ??= 'Backup ফোল্ডার তৈরি/খুঁজে পাওয়া যায়নি';
         return DriveBackupResult.failed;
       }
-      return await _uploadGuarded(fileName, jsonData);
+      var toUpload = jsonData;
+      if (merge != null) {
+        final remote = await fetchRemoteText(fileName);
+        if (remote.failed) {
+          lastError =
+              'Drive-এর আগের ব্যাকআপ নামানো যায়নি — পুরনো ব্যাকআপ বাঁচাতে আপলোড করা হয়নি। ${remote.error ?? ''}';
+          return DriveBackupResult.failed;
+        }
+        if (remote.exists && remote.text != null) {
+          final Map<String, dynamic> localMap, remoteMap;
+          try {
+            localMap = jsonDecode(jsonData) as Map<String, dynamic>;
+            remoteMap = jsonDecode(remote.text!) as Map<String, dynamic>;
+          } catch (e) {
+            lastError = 'Drive-এর আগের ব্যাকআপ নষ্ট — আপলোড করা হয়নি: $e';
+            return DriveBackupResult.failed;
+          }
+          try {
+            final merged = merge(localMap, remoteMap);
+            lastAdditiveCounts = merged.counts;
+            toUpload = jsonEncode(merged.json);
+          } catch (e) {
+            lastError = 'ব্যাকআপ মার্জ করা যায়নি — আপলোড করা হয়নি: $e';
+            return DriveBackupResult.failed;
+          }
+        }
+        // আগের ফাইল নেই → প্রথম ব্যাকআপ; লোকাল যেমন আছে তেমনই যায়।
+      }
+      return await _uploadGuarded(fileName, toUpload);
     } catch (e) {
       lastError = e.toString();
       debugPrint('DriveService backupJson error: $e');
       return DriveBackupResult.failed;
+    }
+  }
+
+  /// Drive-এর আগের ব্যাকআপ ফাইলটা নামায় — additive-মার্জের জন্য।
+  ///  • exists=false, failed=false → ফাইল নেই (প্রথম ব্যাকআপ)।
+  ///  • failed=true → নামানো যায়নি (নেটওয়ার্ক/সাইন-ইন/পড়ার ত্রুটি);
+  ///    এই অবস্থায় কলার আপলোড করবে না। কারণ [error]/[lastError]-এ।
+  /// চুপচাপ সাইন-ইনই ব্যবহার করে — ব্যাকগ্রাউন্ড থেকে কখনো
+  /// অ্যাকাউন্ট বাছাইয়ের পর্দা দেখায় না।
+  Future<({bool exists, String? text, bool failed, String? error})>
+      fetchRemoteText(String fileName) async {
+    if (!await ensureSignedIn()) {
+      lastError ??= 'Google Drive-এ সাইন-ইন করা নেই';
+      return (exists: false, text: null, failed: true, error: lastError);
+    }
+    try {
+      lastError = null;
+      await _initApi();
+      _backupFolderId ??= await _ensureFolder();
+      if (_backupFolderId == null) {
+        return (
+          exists: false,
+          text: null,
+          failed: true,
+          error: 'Backup ফোল্ডার খুঁজে পাওয়া যায়নি'
+        );
+      }
+      final id = await _findNewestFileId(fileName);
+      if (id == null) {
+        return (exists: false, text: null, failed: false, error: null);
+      }
+      final bytes = await _downloadBytesById(id);
+      if (bytes == null) {
+        return (
+          exists: true,
+          text: null,
+          failed: true,
+          error: lastError ?? 'ডাউনলোড ব্যর্থ'
+        );
+      }
+      try {
+        return (
+          exists: true,
+          text: utf8.decode(bytes),
+          failed: false,
+          error: null
+        );
+      } catch (e) {
+        lastError = 'Drive-এর আগের ব্যাকআপ পড়া যায়নি: $e';
+        return (exists: true, text: null, failed: true, error: lastError);
+      }
+    } catch (e) {
+      lastError = e.toString();
+      return (exists: false, text: null, failed: true, error: lastError);
+    }
+  }
+
+  /// ফাইল-id দিয়ে সরাসরি ডাউনলোড (সাইন-ইন আগেই নিশ্চিত ধরা হয়)।
+  Future<List<int>?> _downloadBytesById(String fileId) async {
+    if (_driveApi == null) return null;
+    try {
+      final media = await _driveApi!.files.get(fileId,
+          downloadOptions: drive.DownloadOptions.fullMedia) as drive.Media;
+      final bytes = <int>[];
+      await for (final chunk in media.stream) {
+        bytes.addAll(chunk);
+      }
+      return bytes;
+    } catch (e) {
+      lastError = e.toString();
+      debugPrint('DriveService downloadById error: $e');
+      return null;
     }
   }
 

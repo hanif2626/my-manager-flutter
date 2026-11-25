@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../services/additive_merge.dart';
 import '../../services/drive_service.dart';
 import '../../today/today_service.dart';
 import '../db/reminder_db.dart';
@@ -34,7 +35,9 @@ class ReminderBackupService {
   static Future<DriveBackupResult> backupNow() async {
     final drive = DriveService.instance;
     if (!await drive.ensureSignedIn(interactive: true)) return DriveBackupResult.notSignedIn;
-    return drive.backupJson(fileName, await _export());
+    // Additive: Drive-এর আগের কপির সাথে মার্জ করে তবে আপলোড।
+    return drive.backupJson(fileName, await _export(),
+        merge: AdditiveMerge.mergeReminders);
   }
 
   /// নতুন যোগ হওয়া সংখ্যা; null → ব্যাকআপ নেই/সাইন-ইন নেই।

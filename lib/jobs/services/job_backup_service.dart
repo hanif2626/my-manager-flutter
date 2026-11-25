@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import '../../services/additive_merge.dart';
 import '../../services/drive_service.dart';
 import '../db/job_db.dart';
 import '../models/job_models.dart';
@@ -42,7 +43,9 @@ class JobBackupService {
       final drive = DriveService.instance;
       if (!drive.isSignedIn) return;
       try {
-        final r = await drive.backupJson(fileName, await _exportJson());
+        // Additive: Drive-এর আগের কপির সাথে মার্জ করে তবে আপলোড।
+        final r = await drive.backupJson(fileName, await _exportJson(),
+            merge: AdditiveMerge.mergeJobs);
         if (r == DriveBackupResult.success) lastBackupAt = DateTime.now();
       } catch (_) {
         // সাইলেন্ট ব্যাকআপ কখনো ব্যবহারকারীর কাজ আটকাবে না।
@@ -60,7 +63,8 @@ class JobBackupService {
   /// হাতে-চালানো ব্যাকআপ (ফলাফল দেখানোর জন্য)।
   static Future<DriveBackupResult> backupNow() async {
     if (!await _ensureDrive()) return DriveBackupResult.notSignedIn;
-    final r = await DriveService.instance.backupJson(fileName, await _exportJson());
+    final r = await DriveService.instance.backupJson(fileName, await _exportJson(),
+        merge: AdditiveMerge.mergeJobs);
     if (r == DriveBackupResult.success) lastBackupAt = DateTime.now();
     return r;
   }

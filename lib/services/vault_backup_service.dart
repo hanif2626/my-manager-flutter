@@ -8,6 +8,7 @@ import 'bubble_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/vault_entry.dart';
+import 'additive_merge.dart';
 import 'drive_service.dart';
 import 'settings_service.dart';
 import 'vault_service.dart';
@@ -337,14 +338,71 @@ class VaultBackupService {
     return ds.signIn();
   }
 
+  /// Additive ভল্ট-ব্যাকআপ (২০২৬-১১-২৫ — ওভাররাইট নয়)।
+  /// Drive-এর আগের .mmvault থাকলে একই পাসওয়ার্ডে ডিক্রিপ্ট করে
+  /// ফোনের এন্ট্রির সাথে মার্জ করে (id + নতুন updatedAt জেতে), তবে
+  /// আবার এনক্রিপ্ট করে আপলোড করে — ফোনে মুছে যাওয়া এন্ট্রিও
+  /// Drive-এর কপিতে বেঁচে থাকে।
+  /// Fail-safe: আগের কপি নামানো/ডিক্রিপ্ট করা না গেলে (ভুল পাসওয়ার্ড
+  /// বা নষ্ট ফাইল) আপলোড হয় না — পুরনো ভালো কপি অন্ধভাবে ঢাকা হয় না।
+  /// রিকভারি হিন্ট: নতুন খামে প্রশ্ন/উত্তর না থাকলে আগের খামের hint
+  /// হুবহু রাখা হয়, যাতে পুরনো রিকভারি প্রশ্নটা না হারায়।
+  /// জানা সীমা: ব্যাকআপ পাসওয়ার্ড বদলালে আগের কপি আর ডিক্রিপ্ট করা
+  /// যায় না — তখন এই ব্যাকআপ ব্যর্থ দেখাবে; পাসওয়ার্ড বদলের জন্য
+  /// আলাদা "নতুন করে শুরু" পথ লাগবে (এই প্যাকেজে নেই)।
   static Future<VaultDriveResult> backupToDrive(String password,
       {String? question, String? answer}) async {
     final entries = await _entriesForBackup();
     if (!await _ensureDrive()) return VaultDriveResult.notSignedIn;
-    final enc = await _encrypt(entries, password, question: question, answer: answer);
+    final ds = DriveService.instance;
+    var toEncrypt = entries;
+    AdditiveCounts? additiveCounts;
+    String? preserveHint;
+    final remote = await ds.fetchRemoteText(driveFileName);
+    if (remote.failed) {
+      ds.lastError =
+          'Drive-এর আগের ভল্ট-ব্যাকআপ নামানো যায়নি — পুরনো ব্যাকআপ বাঁচাতে আপলোড করা হয়নি। ${remote.error ?? ''}';
+      return VaultDriveResult.failed;
+    }
+    if (remote.exists && remote.text != null && remote.text!.isNotEmpty) {
+      List<VaultEntry> remoteEntries;
+      try {
+        remoteEntries = await _decrypt(remote.text!, password);
+      } catch (_) {
+        ds.lastError =
+            'Drive-এর আগের ভল্ট-ব্যাকআপ খোলা যায়নি (পাসওয়ার্ড মেলেনি বা ফাইল নষ্ট) — আপলোড করা হয়নি';
+        return VaultDriveResult.failed;
+      }
+      final merged = AdditiveMerge.mergeVaultEntries(
+        entries.map((e) => e.toJson()).toList(),
+        remoteEntries.map((e) => e.toJson()).toList(),
+      );
+      toEncrypt =
+          merged.entries.map((m) => VaultEntry.fromJson(m)).toList();
+      additiveCounts = merged.counts;
+      try {
+        final env = jsonDecode(remote.text!) as Map<String, dynamic>;
+        if (env['hint'] is Map) preserveHint = jsonEncode(env['hint']);
+      } catch (_) {}
+    }
+    var enc =
+        await _encrypt(toEncrypt, password, question: question, answer: answer);
+    if (preserveHint != null &&
+        (question == null || question.trim().isEmpty)) {
+      try {
+        final env = jsonDecode(enc) as Map<String, dynamic>;
+        if (env['hint'] == null) {
+          env['hint'] = jsonDecode(preserveHint);
+          enc = jsonEncode(env);
+        }
+      } catch (_) {}
+    }
     await _rememberQuestion(question);
-    final r = await DriveService.instance.backupJson(driveFileName, enc);
+    final r = await ds.backupJson(driveFileName, enc);
     if (r == DriveBackupResult.success) {
+      // _backupJsonNow শুরুতেই lastAdditiveCounts শূন্য করে — তাই
+      // ভল্টের হিসাব আপলোডের পর বসানো হয়।
+      ds.lastAdditiveCounts = additiveCounts;
       await _markBackup();
       return VaultDriveResult.success;
     }
