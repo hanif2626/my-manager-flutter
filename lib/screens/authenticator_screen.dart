@@ -163,6 +163,51 @@ class _AuthenticatorScreenState extends State<AuthenticatorScreen> {
     await _addTotp(TotpInput(secret.replaceAll(' ', ''), null, acc.isEmpty ? null : acc));
   }
 
+  /// কোড মোছা: এন্ট্রিতে পাসওয়ার্ড/অন্য তথ্য থাকলে শুধু TOTP মুছে যায়
+  /// (এন্ট্রি ভল্টে থাকে); কিছুই না থাকলে পুরো এন্ট্রিটাই মুছে যায়।
+  Future<void> _removeTotp(VaultEntry entry) async {
+    final hasOther = entry.secret.isNotEmpty ||
+        (entry.url?.isNotEmpty ?? false) ||
+        (entry.notes?.isNotEmpty ?? false);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bg2,
+        title: const Text('কোড মুছবেন?'),
+        content: Text(hasOther
+            ? '"${entry.username ?? entry.title}"-এর 2FA কোড মুছে যাবে। পাসওয়ার্ডসহ এন্ট্রিটা ভল্টে থেকে যাবে।'
+            : '"${entry.username ?? entry.title}"-এর কোডসহ পুরো এন্ট্রিটাই মুছে যাবে।'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('বাতিল')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('মুছুন', style: TextStyle(color: AppTheme.danger))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      if (hasOther) {
+        await VaultService.update(VaultEntry(
+          id: entry.id, type: entry.type, title: entry.title,
+          username: entry.username, secret: entry.secret,
+          url: entry.url, notes: entry.notes, totpSecret: null,
+          createdAt: entry.createdAt,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ));
+      } else {
+        await VaultService.delete(entry.id);
+      }
+      if (!mounted) return;
+      await _load();
+      _snack('মুছে গেছে');
+    } on VaultCorruptException {
+      _snack('ভল্টের ডেটা পড়া যাচ্ছে না — মোছা হয়নি, ব্যাকআপ থেকে রিস্টোর করো');
+    } catch (e) {
+      _snack('মোছা যায়নি: $e');
+    }
+  }
+
   void _addSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -234,7 +279,10 @@ class _AuthenticatorScreenState extends State<AuthenticatorScreen> {
                     final e = _entries[i];
                     return Card(
                       margin: const EdgeInsets.only(bottom: 10),
-                      child: Padding(
+                      child: InkWell(
+                        onLongPress: () => _removeTotp(e),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         child: Row(children: [
                           Expanded(
@@ -251,7 +299,13 @@ class _AuthenticatorScreenState extends State<AuthenticatorScreen> {
                             ),
                           ),
                           TotpCode(secret: e.totpSecret!, large: true, onCopy: _copy),
+                          IconButton(
+                            icon: Icon(Icons.more_vert, color: AppTheme.textMuted),
+                            tooltip: 'কোড মুছুন',
+                            onPressed: () => _removeTotp(e),
+                          ),
                         ]),
+                        ),
                       ),
                     );
                   },
