@@ -81,7 +81,7 @@ class NotificationService {
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
-      payload: 'project_$id',
+      payload: id > 1000 ? 'idea_${id - 1000}' : 'project_$id',
     );
 
     debugPrint('Scheduled notification #$id at $scheduledTime');
@@ -252,16 +252,19 @@ class NotificationService {
     try {
       await _plugin.zonedSchedule(9199, title, body, at, const NotificationDetails(android: d),
           androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime);
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+          payload: 'job_radar');
     } catch (_) {
       await _plugin.zonedSchedule(9199, title, body, at, const NotificationDetails(android: d),
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime);
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+          payload: 'job_radar');
     }
   }
 
   /// নতুন সার্কুলার/বাড়ানো শেষ তারিখ — সাথে সাথে জানানো (একই আইডি: একাধিক হলে একটাই নোটিফিকেশনে জমে)।
-  static Future<void> showRadarNew(String title, String body, String bigText) async {
+  static Future<void> showRadarNew(String title, String body, String bigText,
+      {String? focusUrl}) async {
     await init();
     final d = AndroidNotificationDetails(
       'radar_new_channel',
@@ -272,7 +275,10 @@ class NotificationService {
       icon: '@mipmap/ic_launcher',
       styleInformation: BigTextStyleInformation(bigText, contentTitle: title, summaryText: body),
     );
-    await _plugin.show(9110, title, body, NotificationDetails(android: d), payload: 'job_radar');
+    await _plugin.show(9110, title, body, NotificationDetails(android: d),
+        payload: (focusUrl == null || focusUrl.isEmpty)
+            ? 'job_radar'
+            : 'job_item|${Uri.encodeComponent(focusUrl)}');
   }
 
   /// প্রবেশপত্র নজরদারি: সাইটে নতুন প্রবেশপত্রের লিংক/নোটিশ পাওয়া গেলে (আইডি ৯৪০০–৯৪৮৯, সার্কুলার ধরে)।
@@ -288,7 +294,7 @@ class NotificationService {
       category: AndroidNotificationCategory.reminder,
       styleInformation: BigTextStyleInformation(bigText, contentTitle: title, summaryText: body),
     );
-    await _plugin.show(9400 + (circularId % 90), title, body, NotificationDetails(android: d), payload: 'job_admit');
+    await _plugin.show(9400 + (circularId % 90), title, body, NotificationDetails(android: d), payload: 'job_admit|$circularId');
   }
 
   // ── শেষ তারিখ ঘনিয়ে এলে (আইডি ৯২০০–৯৩১৯) ──
@@ -310,7 +316,7 @@ class NotificationService {
   /// সার্কুলারের আবেদনের শেষ তারিখের আগের সতর্কতা ফোনের অ্যালার্মে আগেই বসায় — ইন্টারনেট বা
   /// ব্যাকগ্রাউন্ড টাস্ক না চললেও ঠিক সময়ে আসে। যতবার খুশি ডাকা যায় (আগেরগুলো বাতিল করে নতুন বসায়)।
   static Future<void> scheduleRadarDeadlineAlarms(
-      List<({DateTime when, String title, String body, String big})> msgs) async {
+      List<({DateTime when, String title, String body, String big, String url})> msgs) async {
     await cancelRadarDeadlineAlarms();
     var id = _radarDeadlineBase;
     for (final m in msgs.take(_radarDeadlineMax)) {
@@ -327,17 +333,20 @@ class NotificationService {
         ),
       );
       final at = tz.TZDateTime.from(m.when, tz.local);
+      final payload = m.url.isEmpty
+          ? 'job_radar'
+          : 'job_item|${Uri.encodeComponent(m.url)}';
       try {
         await _plugin.zonedSchedule(id, m.title, m.body, at, details,
             androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
             uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-            payload: 'job_radar');
+            payload: payload);
       } catch (_) {
         try {
           await _plugin.zonedSchedule(id, m.title, m.body, at, details,
               androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
               uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-              payload: 'job_radar');
+              payload: payload);
         } catch (_) {}
       }
       id++;

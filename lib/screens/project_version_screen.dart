@@ -23,7 +23,12 @@ class _ProjectVersionScreenState extends State<ProjectVersionScreen> {
 
   Future<void> _saveNewVersion() async {
     final noteCtrl = TextEditingController();
-    final nextVersion = (widget.project.version) + 1;
+    var maxVersion = widget.project.version;
+    for (final v in _versions) {
+      final n = (v['version'] as int?) ?? 0;
+      if (n > maxVersion) maxVersion = n;
+    }
+    final nextVersion = maxVersion + 1;
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(

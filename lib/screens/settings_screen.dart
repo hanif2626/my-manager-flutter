@@ -73,6 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setAutofillSaving(bool v) async {
+    if (_autofillSavingEnabled == null || _autofillIMEEnabled == null) return;
     try {
       await AutofillService().setPreferences(AutofillPreferences(
         enableDebug: false, enableSaving: v, enableIMERequests: _autofillIMEEnabled ?? false,
@@ -82,6 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setAutofillIME(bool v) async {
+    if (_autofillSavingEnabled == null || _autofillIMEEnabled == null) return;
     try {
       await AutofillService().setPreferences(AutofillPreferences(
         enableDebug: false, enableSaving: _autofillSavingEnabled ?? true, enableIMERequests: v,
@@ -211,6 +213,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = SettingsService.isDark;
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
@@ -221,12 +224,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           _sectionTitle('থিম'),
           _settingTile(
-            icon: _isDark ? Icons.dark_mode : Icons.light_mode,
-            iconColor: _isDark ? AppTheme.accent : AppTheme.yellow,
-            title: _isDark ? 'ডার্ক মোড চালু' : 'লাইট মোড চালু',
+            icon: isDark ? Icons.dark_mode : Icons.light_mode,
+            iconColor: isDark ? AppTheme.accent : AppTheme.yellow,
+            title: isDark ? 'ডার্ক মোড চালু' : 'লাইট মোড চালু',
             subtitle: 'থিম পরিবর্তন করো',
             trailing: Switch(
-              value: _isDark,
+              value: isDark,
               activeColor: AppTheme.accent,
               onChanged: (val) async {
                 await SettingsService.setDark(val);
@@ -410,7 +413,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionTitle('অ্যাপ তথ্য'),
           _settingTile(
             icon: Icons.rocket_launch_outlined, iconColor: AppTheme.accent,
-            title: 'My Manager', subtitle: 'Version 5.0.0 — Deadline & Multi-select Update',
+            title: 'My Manager', subtitle: 'Version 5.3.2',
           ),
           _settingTile(
             icon: Icons.code, iconColor: AppTheme.textSecondary,
@@ -418,7 +421,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           _settingTile(
             icon: Icons.storage_outlined, iconColor: AppTheme.green,
-            title: 'Storage', subtitle: 'SQLite Local Database (v5)',
+            title: 'Storage', subtitle: 'SQLite Local Database (v8)',
           ),
 
           const SizedBox(height: 16),

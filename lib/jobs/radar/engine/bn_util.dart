@@ -39,15 +39,18 @@ List<FoundDate> findDates(String text) {
   final t = toEn(text);
   final out = <FoundDate>[];
   final re1 = RegExp('(\\d{1,2})\\s*($_monthAlt)[,\\s]*(\\d{4})', caseSensitive: false);
+  bool valid(int y, int mo, int d) =>
+      mo >= 1 && mo <= 12 && d >= 1 && d <= DateTime.utc(y, mo + 1, 0).day;
   for (final m in re1.allMatches(t)) {
     final mo = monthsMap[m[2]!.toLowerCase()] ?? monthsMap[m[2]!];
-    if (mo != null) out.add(FoundDate(ymdUtc(int.parse(m[3]!), mo, int.parse(m[1]!)), m.start));
+    final y = int.parse(m[3]!), d = int.parse(m[1]!);
+    if (mo != null && valid(y, mo, d)) out.add(FoundDate(ymdUtc(y, mo, d), m.start));
   }
   final re2 = RegExp(r'(\d{1,2})[./-](\d{1,2})[./-](\d{4})');
   for (final m in re2.allMatches(t)) {
-    final d = int.parse(m[1]!), mo = int.parse(m[2]!);
-    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
-      out.add(FoundDate(ymdUtc(int.parse(m[3]!), mo, d), m.start));
+    final d = int.parse(m[1]!), mo = int.parse(m[2]!), y = int.parse(m[3]!);
+    if (valid(y, mo, d)) {
+      out.add(FoundDate(ymdUtc(y, mo, d), m.start));
     }
   }
   out.sort((a, b) => a.index.compareTo(b.index));

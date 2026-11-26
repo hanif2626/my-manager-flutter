@@ -35,7 +35,7 @@ class VaultCsvImportResult {
 class VaultCsvService {
   // First five columns intentionally identical to Google Password
   // Manager / Chrome exports so the file can round-trip with them.
-  static const _exportHeader = ['name', 'url', 'username', 'password', 'note', 'type'];
+  static const _exportHeader = ['name', 'url', 'username', 'password', 'note', 'type', 'totp'];
 
   static String _quote(String v) {
     if (v.contains(',') || v.contains('"') || v.contains('\n') || v.contains('\r')) {
@@ -55,6 +55,7 @@ class VaultCsvService {
         _quote(e.secret),
         _quote(e.notes ?? ''),
         _quote(e.type),
+        _quote(e.totpSecret ?? ''),
       ].join(','));
       b.write('\r\n');
     }
@@ -156,7 +157,21 @@ class VaultCsvService {
     'secret': ['secret', 'password', 'login_password', 'pass'],
     'url': ['url', 'uri', 'login_uri', 'website', 'web site'],
     'notes': ['notes', 'note', 'comment', 'comments'],
+    'totp': ['totp', 'totpsecret', 'totp_secret', 'otp', 'otp_secret', '2fa', 'twofactor', 'two_factor'],
   };
+
+  static String _totpValue(String raw) {
+    var v = raw.trim();
+    if (v.isEmpty) return '';
+    if (v.toLowerCase().startsWith('otpauth://')) {
+      try {
+        v = Uri.parse(v).queryParameters['secret'] ?? '';
+      } catch (_) {
+        return '';
+      }
+    }
+    return v.replaceAll(RegExp(r'\s+'), '').toUpperCase();
+  }
 
   static String _hostOf(String url) {
     var u = url.trim();
@@ -208,13 +223,14 @@ class VaultCsvService {
       return row[i];
     }
 
-    String keyOf(String type, String title, String user, String secret, String url) =>
-        '$type|$title|$user|$secret|$url';
+    String keyOf(String type, String title, String user, String secret, String url, String totp) =>
+        '$type|$title|$user|$secret|$url|$totp';
 
     final existing = await VaultService.getAll();
     final seen = <String>{
       for (final e in existing)
-        keyOf(e.type, e.title.trim(), (e.username ?? '').trim(), e.secret, (e.url ?? '').trim()),
+        keyOf(e.type, e.title.trim(), (e.username ?? '').trim(), e.secret,
+            (e.url ?? '').trim(), _totpValue(e.totpSecret ?? '')),
     };
 
     final newEntries = <VaultEntry>[];
@@ -239,7 +255,8 @@ class VaultCsvService {
       var type = cell(row, 'type').trim().toLowerCase();
       if (!['login', 'note', 'card', 'token', 'wifi'].contains(type)) type = 'login';
 
-      final key = keyOf(type, title, username, secret, url);
+      final totp = _totpValue(cell(row, 'totp'));
+      final key = keyOf(type, title, username, secret, url, totp);
       if (!seen.add(key)) {
         duplicates++;
         continue;
@@ -254,6 +271,7 @@ class VaultCsvService {
         secret: secret,
         url: url.isEmpty ? null : url,
         notes: notes.isEmpty ? null : notes,
+        totpSecret: totp.isEmpty ? null : totp,
         createdAt: now,
         updatedAt: now,
       ));

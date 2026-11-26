@@ -6,6 +6,7 @@ import '../models/idea_file.dart';
 import '../widgets/app_theme.dart';
 import '../services/auth_service.dart';
 import 'idea_detail_screen.dart';
+import 'project_detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -16,9 +17,14 @@ class _SearchScreenState extends State<SearchScreen> {
   final _ctrl = TextEditingController();
   List<_SearchResult> _results = [];
   bool _searching = false;
+  int _searchSeq = 0;
 
   Future<void> _search(String q) async {
-    if (q.trim().isEmpty) { setState(() => _results = []); return; }
+    final seq = ++_searchSeq;
+    if (q.trim().isEmpty) {
+      setState(() { _results = []; _searching = false; });
+      return;
+    }
     setState(() => _searching = true);
     final query = q.toLowerCase();
     final results = <_SearchResult>[];
@@ -50,7 +56,9 @@ class _SearchScreenState extends State<SearchScreen> {
         }
       }
     }
-    if (mounted) setState(() { _results = results; _searching = false; });
+    if (mounted && seq == _searchSeq) {
+      setState(() { _results = results; _searching = false; });
+    }
   }
 
   @override
@@ -72,7 +80,11 @@ class _SearchScreenState extends State<SearchScreen> {
         actions: [
           if (_ctrl.text.isNotEmpty)
             IconButton(
-              onPressed: () { _ctrl.clear(); setState(() => _results = []); },
+              onPressed: () {
+                _searchSeq++;
+                _ctrl.clear();
+                setState(() { _results = []; _searching = false; });
+              },
               icon: const Icon(Icons.close),
             ),
         ],
@@ -125,16 +137,20 @@ class _SearchScreenState extends State<SearchScreen> {
                               fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                         onTap: () async {
+                          if (r.project.isLocked) {
+                            final ok = await AuthService.authenticate(
+                                reason: '"${r.project.name}" লক করা — যাচাই করো');
+                            if (!ok) return;
+                          }
+                          if (!context.mounted) return;
                           if (r.idea != null) {
-                            if (r.project.isLocked) {
-                              final ok = await AuthService.authenticate(
-                                  reason: '"${r.project.name}" লক করা — যাচাই করো');
-                              if (!ok) return;
-                            }
-                            if (!context.mounted) return;
                             Navigator.push(context, MaterialPageRoute(
                                 builder: (_) => IdeaDetailScreen(
                                     idea: r.idea!, project: r.project)));
+                          } else {
+                            Navigator.push(context, MaterialPageRoute(
+                                builder: (_) => ProjectDetailScreen(
+                                    project: r.project)));
                           }
                         },
                       ),

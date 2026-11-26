@@ -44,6 +44,7 @@ class _IdeaComposerScreenState extends State<IdeaComposerScreen> {
   String _saveState = 'লিখলেই সেভ হবে';
   bool _savedExplicitly = false;
   bool _persisting = false;
+  Future<void>? _persistFuture;
   bool _changed = false;
   int? _createdIdeaId;
   int? _createdAt;
@@ -96,7 +97,16 @@ class _IdeaComposerScreenState extends State<IdeaComposerScreen> {
   /// আগের bottom-sheet ফর্মের একই persist লজিক: প্রথম autosave-এ
   /// row তৈরি হয়, পরেরগুলো সেই row-ই আপডেট করে; attachment শুধু
   /// প্রথমবার লেখা হয়, যাতে বারবার একই ফাইল না জমে।
-  Future<void> _persist() async {
+  Future<void> _persist() {
+    if (_persistFuture != null) return _persistFuture!;
+    final f = _doPersist();
+    _persistFuture = f;
+    return f.whenComplete(() {
+      if (identical(_persistFuture, f)) _persistFuture = null;
+    });
+  }
+
+  Future<void> _doPersist() async {
     if (_titleCtrl.text.trim().isEmpty || _persisting) return;
     _persisting = true;
     try {
@@ -163,7 +173,9 @@ class _IdeaComposerScreenState extends State<IdeaComposerScreen> {
       return;
     }
     _savedExplicitly = true;
+    _debounce?.cancel();
     await _persist();
+    await _persist(); // চলমান সেভের পরে লেখা বদলে থাকলে সর্বশেষটাও সেভ
     if (mounted) Navigator.pop(context, true);
   }
 

@@ -212,9 +212,11 @@ class _LifeHomeScreenState extends State<LifeHomeScreen> {
                   _headerIconButton(
                     icon: _isDark ? Icons.dark_mode : Icons.light_mode,
                     color: _isDark ? AppTheme.accent : AppTheme.yellow,
-                    onTap: () {
+                    onTap: () async {
+                      await SettingsService.setDark(!SettingsService.isDark);
+                      if (!mounted) return;
+                      setState(() => _isDark = SettingsService.isDark);
                       widget.onThemeToggle();
-                      setState(() => _isDark = !_isDark);
                     },
                   ),
                   const SizedBox(width: 8),

@@ -21,8 +21,8 @@ const circularStatusIcons = <String, String>{
 
 List<int> _ids(String? s) => (s ?? '')
     .split(',')
-    .where((e) => e.trim().isNotEmpty)
-    .map(int.parse)
+    .map((e) => int.tryParse(e.trim()))
+    .whereType<int>()
     .toList();
 
 DateTime? _d(String? s) => (s == null || s.isEmpty) ? null : Reminder.parseYmd(s);
@@ -78,19 +78,21 @@ class Circular {
       };
 
   factory Circular.fromMap(Map<String, dynamic> m) => Circular(
-        id: m['id'] as int,
-        title: m['title'] as String,
-        org: (m['org'] as String?) ?? '',
-        post: (m['post'] as String?) ?? '',
-        deadline: _d(m['deadline'] as String?),
-        examDate: _d(m['exam_date'] as String?),
-        fee: (m['fee'] as int?) ?? 0,
-        status: (m['status'] as String?) ?? 'watching',
-        url: (m['url'] as String?) ?? '',
-        note: (m['note'] as String?) ?? '',
-        deadlineRem: _ids(m['deadline_rem'] as String?),
-        examRem: _ids(m['exam_rem'] as String?),
-        createdAt: m['created_at'] as int?,
+        id: (m['id'] as num?)?.toInt(),
+        title: (m['title'] ?? '').toString(),
+        org: (m['org'] ?? '').toString(),
+        post: (m['post'] ?? '').toString(),
+        deadline: _d(m['deadline']?.toString()),
+        examDate: _d(m['exam_date']?.toString()),
+        fee: (m['fee'] as num?)?.toInt() ?? 0,
+        status: circularStatuses.containsKey(m['status'])
+            ? m['status'] as String
+            : 'watching',
+        url: (m['url'] ?? '').toString(),
+        note: (m['note'] ?? '').toString(),
+        deadlineRem: _ids(m['deadline_rem']?.toString()),
+        examRem: _ids(m['exam_rem']?.toString()),
+        createdAt: (m['created_at'] as num?)?.toInt(),
       );
 
   int? get daysLeft => deadline == null

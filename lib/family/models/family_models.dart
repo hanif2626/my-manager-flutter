@@ -29,8 +29,8 @@ const contactKinds = <String, (String, String)>{
 
 List<int> _ids(String? s) => (s ?? '')
     .split(',')
-    .where((e) => e.trim().isNotEmpty)
-    .map(int.parse)
+    .map((e) => int.tryParse(e.trim()))
+    .whereType<int>()
     .toList();
 
 DateTime? _d(String? s) => (s == null || s.isEmpty) ? null : Reminder.parseYmd(s);
@@ -217,7 +217,7 @@ class FamilyBill {
         title: m['title'] as String,
         type: (m['type'] as String?) ?? 'other',
         amount: (m['amount'] as int?) ?? 0,
-        dueDay: (m['due_day'] as int?) ?? 10,
+        dueDay: ((m['due_day'] as num?)?.toInt() ?? 10).clamp(1, 28),
         lastPaidMonth: (m['last_paid_month'] as String?) ?? '',
         note: (m['note'] as String?) ?? '',
         rem: _ids(m['rem'] as String?),

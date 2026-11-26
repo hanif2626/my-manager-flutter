@@ -220,27 +220,37 @@ class DocsBackupService {
     final have = (await DocsDB.all()).map((d) => d.id).toSet();
     var added = 0, skipped = 0;
     for (final raw in (meta['docs'] as List? ?? const [])) {
-      final m = Map<String, dynamic>.from(raw as Map);
-      final id = m['id'] as String;
-      if (have.contains(id)) {
-        skipped++;
-        continue;
-      }
-      final plainNumber = (m.remove('number_plain') as String?) ?? '';
-      m['number_enc'] = '';
-      m['rem'] = '';
-      final doc = VaultDoc.fromMap(m);
-      // প্রতিটা ফাইল এই ফোনের নিজের কী দিয়ে নতুন করে এনক্রিপ্ট।
-      for (final p in doc.pages) {
-        final f = archive.findFile('files/${p.fileId}');
-        if (f != null) {
-          await DocsCrypto.saveFile(Uint8List.fromList(f.content as List<int>), fileId: p.fileId);
+      try {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final id = m['id']?.toString() ?? '';
+        if (id.isEmpty || have.contains(id)) {
+          skipped++;
+          continue;
         }
+        final plainNumber = (m.remove('number_plain') as String?) ?? '';
+        m['number_enc'] = '';
+        m['rem'] = '';
+        final doc = VaultDoc.fromMap(m);
+        final beforePages = doc.pages.length;
+        // প্রতিটা ফাইল এই ফোনের নিজের কী দিয়ে নতুন করে এনক্রিপ্ট।
+        for (final p in doc.pages) {
+          final f = archive.findFile('files/${p.fileId}');
+          if (f != null) {
+            await DocsCrypto.saveFile(Uint8List.fromList(f.content as List<int>), fileId: p.fileId);
+          }
+        }
+        doc.pages.removeWhere((p) => archive.findFile('files/${p.fileId}') == null);
+        if (beforePages > 0 && doc.pages.isEmpty) {
+          skipped++;
+          continue;
+        }
+        await DocsService.save(doc, number: plainNumber); // নম্বর এনক্রিপ্ট + মেয়াদের রিমাইন্ডার নতুন করে
+        if (doc.owner.trim().isNotEmpty) await DocOwners.add(doc.owner.trim());
+        have.add(id);
+        added++;
+      } catch (_) {
+        skipped++;
       }
-      doc.pages.removeWhere((p) => archive.findFile('files/${p.fileId}') == null);
-      await DocsService.save(doc, number: plainNumber); // নম্বর এনক্রিপ্ট + মেয়াদের রিমাইন্ডার নতুন করে
-      if (doc.owner.trim().isNotEmpty) await DocOwners.add(doc.owner.trim());
-      added++;
     }
     return DocsRestoreResult(added, skipped);
   }

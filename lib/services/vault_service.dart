@@ -170,7 +170,7 @@ class VaultService {
     final byId = <String, int>{};
     for (var i = 0; i < list.length; i++) { byId[list[i].id] = i; }
     String sig(VaultEntry e) =>
-        '${e.type}\u0001${e.title}\u0001${e.username ?? ''}\u0001${e.secret}\u0001${e.url ?? ''}';
+        '${e.type}\u0001${e.title}\u0001${e.username ?? ''}\u0001${e.secret}\u0001${e.url ?? ''}\u0001${e.totpSecret ?? ''}';
     final sigs = list.map(sig).toSet();
 
     var added = 0, updated = 0, skipped = 0;

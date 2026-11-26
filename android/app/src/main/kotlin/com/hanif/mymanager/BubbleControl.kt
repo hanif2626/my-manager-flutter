@@ -59,12 +59,16 @@ object BubbleControl {
     /** ফোরগ্রাউন্ড থেকে ডাকা হয় (Settings টগল / অ্যাপ চালু) — ব্যাকগ্রাউন্ড থেকে নয়। */
     fun startBubble(ctx: Context): Boolean {
         if (!isOverlayGranted(ctx)) return false
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_ENABLED, true).apply()
         val intent = Intent(ctx, BubbleService::class.java)
             .apply { action = BubbleService.ACTION_START }
-        ContextCompat.startForegroundService(ctx, intent)
-        return true
+        return try {
+            ContextCompat.startForegroundService(ctx, intent)
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_ENABLED, true).apply()
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun stopBubble(ctx: Context) {

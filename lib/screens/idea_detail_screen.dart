@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import '../services/bubble_picker.dart';
 import 'package:archive/archive_io.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import '../db/db_helper.dart';
@@ -34,13 +35,25 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
   late Idea _idea;
   bool _loading = true;
   final _audioPlayer = AudioPlayer();
+  StreamSubscription? _audioCompleteSub;
   String? _playingFileId; // tracks which file is currently playing
 
   @override
-  void initState() { super.initState(); _idea = widget.idea; _load(); }
+  void initState() {
+    super.initState();
+    _idea = widget.idea;
+    _audioCompleteSub = _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _playingFileId = null);
+    });
+    _load();
+  }
 
   @override
-  void dispose() { _audioPlayer.dispose(); super.dispose(); }
+  void dispose() {
+    _audioCompleteSub?.cancel();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
 
   Future<void> _load() async {
     if (_idea.id == null) return;
@@ -264,10 +277,11 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
       if (caption == null) return;
       final bytes = await picked.readAsBytes();
       final b64 = base64Encode(bytes);
-      final ext = picked.name.split('.').last.toLowerCase();
-      final name = picked.name.toLowerCase().contains('icon')
-          ? picked.name : 'icon.$ext';
       final n = now();
+      final ext = picked.name.contains('.')
+          ? picked.name.split('.').last.toLowerCase()
+          : 'jpg';
+      final name = picked.name.trim().isNotEmpty ? picked.name : 'image_$n.$ext';
       await DBHelper.insertFile(IdeaFile(
         ideaId: _idea.id!, projectId: widget.project.id!,
         name: name, type: 'image', content: b64,
@@ -290,10 +304,11 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
       final b64 = base64Encode(bytes);
-      final ext = picked.name.split('.').last.toLowerCase();
-      final name = picked.name.toLowerCase().contains('icon')
-          ? picked.name : 'icon.$ext';
       final n = now();
+      final ext = picked.name.contains('.')
+          ? picked.name.split('.').last.toLowerCase()
+          : 'jpg';
+      final name = picked.name.trim().isNotEmpty ? picked.name : 'image_$n.$ext';
       await DBHelper.insertFile(IdeaFile(
         ideaId: _idea.id!, projectId: widget.project.id!,
         name: name, type: 'image', content: b64,
@@ -492,10 +507,8 @@ class _IdeaDetailScreenState extends State<IdeaDetailScreen> {
       await tmpFile.writeAsBytes(bytes);
       setState(() => _playingFileId = file.id.toString());
       await _audioPlayer.play(DeviceFileSource(tmpFile.path));
-      _audioPlayer.onPlayerComplete.listen((_) {
-        if (mounted) setState(() => _playingFileId = null);
-      });
     } catch (e) {
+      if (mounted) setState(() => _playingFileId = null);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Play error: $e'), backgroundColor: AppTheme.red));
     }

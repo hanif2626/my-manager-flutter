@@ -40,7 +40,7 @@
         android:label="My Manager"
         android:name=".MyManagerApplication"
         android:icon="@mipmap/ic_launcher"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:importantForAutofill="noExcludeDescendants"
         android:theme="@style/LaunchTheme">
 

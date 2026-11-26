@@ -41,8 +41,12 @@ class Idea {
         projectId: m['project_id'],
         title: m['title'],
         description: m['description'],
-        status: m['status'] ?? 'todo',
-        priority: m['priority'] ?? 'medium',
+        status: const {'todo', 'doing', 'done'}.contains(m['status'])
+            ? m['status'] as String
+            : 'todo',
+        priority: const {'low', 'medium', 'high'}.contains(m['priority'])
+            ? m['priority'] as String
+            : 'medium',
         isArchived: m['is_archived'] ?? 0,
         deadline: m['deadline'],
         createdAt: m['created_at'],

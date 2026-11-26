@@ -7,12 +7,13 @@ import '../db/db_helper.dart';
 import '../models/project.dart';
 import '../models/idea.dart';
 import '../models/idea_file.dart';
+import '../models/checklist_item.dart';
 
 class ExportService {
 
   static Future<String?> exportProject(Project project) async {
     try {
-      final ideas = await DBHelper.getIdeas(project.id!);
+      final ideas = await DBHelper.getIdeas(project.id!, includeArchived: true);
       final archive = Archive();
 
       final projectMeta = jsonEncode({
@@ -30,10 +31,16 @@ class ExportService {
         final folder = '${i + 1}_${_safeName(idea.title)}';
 
         final ideaFiles = await DBHelper.getFiles(idea.id!);
+        final checks = await DBHelper.getChecklist(idea.id!);
         final ideaMeta = jsonEncode({
           'id': idea.id, 'title': idea.title,
           'description': idea.description, 'status': idea.status,
           'priority': idea.priority, 'created_at': idea.createdAt,
+          'deadline': idea.deadline, 'is_archived': idea.isArchived,
+          'checklist': [
+            for (final c in checks)
+              {'text': c.text, 'done': c.done, 'sort_order': c.sortOrder},
+          ],
           'files': [
             for (final f in ideaFiles)
               {'name': f.name, if (f.caption != null) 'caption': f.caption},
@@ -163,6 +170,9 @@ class ExportService {
         String? ideaDesc;
         String ideaStatus = 'todo';
         String ideaPriority = 'medium';
+        int? ideaDeadline;
+        int ideaArchived = 0;
+        final checklist = <Map<String, dynamic>>[];
         final capByName = <String, String>{};
 
         if (ideaMetaFile != null) {
@@ -170,8 +180,22 @@ class ExportService {
             final m = jsonDecode(utf8.decode(ideaMetaFile.content as List<int>));
             ideaTitle = m['title'] ?? ideaTitle;
             ideaDesc = m['description'];
-            ideaStatus = m['status'] ?? 'todo';
-            ideaPriority = m['priority'] ?? 'medium';
+            ideaStatus = const {'todo', 'doing', 'done'}.contains(m['status'])
+                ? m['status'] as String
+                : 'todo';
+            ideaPriority = const {'low', 'medium', 'high'}.contains(m['priority'])
+                ? m['priority'] as String
+                : 'medium';
+            ideaDeadline = (m['deadline'] as num?)?.toInt();
+            ideaArchived = (m['is_archived'] as num?)?.toInt() == 1 ? 1 : 0;
+            final cl = m['checklist'];
+            if (cl is List) {
+              for (final x in cl) {
+                if (x is Map && x['text'] != null) {
+                  checklist.add(Map<String, dynamic>.from(x));
+                }
+              }
+            }
             final fl = m['files'];
             if (fl is List) {
               for (final x in fl) {
@@ -186,9 +210,20 @@ class ExportService {
         final ideaId = await DBHelper.insertIdea(Idea(
           projectId: projectId, title: ideaTitle, description: ideaDesc,
           status: ideaStatus, priority: ideaPriority,
+          isArchived: ideaArchived, deadline: ideaDeadline,
           createdAt: n, updatedAt: n,
         ));
         ideaCount++;
+        for (final c in checklist) {
+          await DBHelper.insertChecklistItem(ChecklistItem(
+            ideaId: ideaId,
+            text: c['text'].toString(),
+            done: (c['done'] as num?)?.toInt() == 1 ? 1 : 0,
+            sortOrder: (c['sort_order'] as num?)?.toInt() ?? 0,
+            createdAt: n,
+            updatedAt: n,
+          ));
+        }
 
         final ideaFiles = archive.files.where((f) =>
             f.name.startsWith('$folder/') &&

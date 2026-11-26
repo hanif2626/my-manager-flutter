@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -119,6 +120,15 @@ class BubbleService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_START &&
+            (!BubbleControl.isBubbleEnabled(applicationContext) ||
+                !Settings.canDrawOverlays(applicationContext))
+        ) {
+            applicationContext.getSharedPreferences(BubbleControl.PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(BubbleControl.KEY_ENABLED, false).apply()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             ACTION_STOP -> {
                 stopSelf()
@@ -141,6 +151,23 @@ class BubbleService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val (w, h) = screenSize()
+        screenW = w
+        screenH = h
+        if (dotAdded) {
+            dotParams.x = dotParams.x.coerceIn(0, max(0, screenW - dotSizePx))
+            dotParams.y = dotParams.y.coerceIn(0, max(0, screenH - dotSizePx))
+            try {
+                windowManager.updateViewLayout(dotView, dotParams)
+            } catch (_: Exception) {
+            }
+        }
+        if (dotHomeX >= 0) dotHomeX = dotHomeX.coerceIn(0, max(0, screenW - dotSizePx))
+        if (dotHomeY >= 0) dotHomeY = dotHomeY.coerceIn(0, max(0, screenH - dotSizePx))
     }
 
     override fun onDestroy() {

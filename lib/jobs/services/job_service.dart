@@ -150,7 +150,12 @@ class JobService {
         updatedAt: ms,
       ));
       map[key] = entryId;
-      await SettingsService.setString(_feeKey, jsonEncode(map));
+      try {
+        await SettingsService.setString(_feeKey, jsonEncode(map));
+      } catch (_) {
+        await CashbookDB.deleteEntry(entryId);
+        rethrow;
+      }
       return '💰 আবেদন ফি ৳${bn(c.fee)} ক্যাশবুকে খরচ হিসেবে যোগ হয়েছে';
     }
 

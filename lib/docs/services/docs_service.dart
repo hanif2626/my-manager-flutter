@@ -42,8 +42,8 @@ class DocsService {
   }) async {
     if (number != null) doc.numberEnc = await DocsCrypto.encryptText(number);
 
-    for (final p in removed) {
-      await DocsCrypto.deleteFile(p.fileId);
+    final removedFiles = removed.toList();
+    for (final p in removedFiles) {
       doc.pages.removeWhere((x) => x.fileId == p.fileId);
     }
     for (final a in added) {
@@ -54,6 +54,9 @@ class DocsService {
     doc.updatedAt = DateTime.now().millisecondsSinceEpoch;
     await _syncReminders(doc);
     await DocsDB.upsert(doc);
+    for (final p in removedFiles) {
+      await DocsCrypto.deleteFile(p.fileId);
+    }
     changes.value++;
   }
 
@@ -128,11 +131,11 @@ class DocsService {
   }
 
   static Future<void> delete(VaultDoc doc) async {
+    await DocsDB.delete(doc.id);
+    await _deleteReminders(doc.rem);
     for (final p in doc.pages) {
       await DocsCrypto.deleteFile(p.fileId);
     }
-    await _deleteReminders(doc.rem);
-    await DocsDB.delete(doc.id);
     changes.value++;
   }
 

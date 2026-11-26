@@ -181,11 +181,12 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       ),
     );
     if (status == null) return;
+    final count = _selected.length;
     await DBHelper.bulkUpdateStatus(_selected.toList(), status);
     setState(() { _selected.clear(); _selectMode = false; });
     _load();
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('✅ ${_selected.length} টা idea আপডেট হয়েছে'),
+      content: Text('✅ $count টা idea আপডেট হয়েছে'),
       backgroundColor: AppTheme.green,
     ));
   }
@@ -329,7 +330,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 itemBuilder: (_, i) {
                   final idea = archived[i];
                   final doneDate = DateTime.fromMillisecondsSinceEpoch(idea.updatedAt);
-                  final dateStr = '\${doneDate.day}/\${doneDate.month}/\${doneDate.year}';
+                  final dateStr = '${doneDate.day}/${doneDate.month}/${doneDate.year}';
                   return Container(
                     decoration: BoxDecoration(
                       color: AppTheme.bg3,
@@ -359,7 +360,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                 color: AppTheme.textMuted, fontSize: 11),
                                 maxLines: 1, overflow: TextOverflow.ellipsis),
                           const SizedBox(height: 2),
-                          Text('✅ Done: \$dateStr', style:  TextStyle(
+                          Text('✅ Done: $dateStr', style:  TextStyle(
                               color: AppTheme.green, fontSize: 10, fontWeight: FontWeight.w500)),
                         ],
                       ),

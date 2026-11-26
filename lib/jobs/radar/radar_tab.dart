@@ -27,7 +27,11 @@ import 'teletalk_browse.dart';
 class RadarTab extends StatefulWidget {
   /// সার্কুলার যোগ হলে হাব রিফ্রেশ করার কলব্যাক।
   final VoidCallback onSaved;
-  const RadarTab({super.key, required this.onSaved});
+
+  /// নোটিফিকেশন থেকে এলে এই সার্কুলারটা সবার আগে ও খোলা দেখাবে।
+  final String? focusUrl;
+
+  const RadarTab({super.key, required this.onSaved, this.focusUrl});
   @override
   State<RadarTab> createState() => _RadarTabState();
 }
@@ -44,12 +48,37 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
   Set<String> _saved = {};
   Set<String> _hidden = {}; // একবারই পড়ি — কার্ড বানানোর সময় প্রতিবার JSON ডিকোড করলে ধীর হতো
   final Set<String> _expanded = {}; // যাচাইয়ের বিস্তারিত খোলা কার্ড
+  final ScrollController _scroll = ScrollController();
+  final Map<String, GlobalKey> _itemKeys = {};
+  bool _focusScrolled = false;
+
+  GlobalKey _keyFor(String url) => _itemKeys.putIfAbsent(url, () => GlobalKey());
+
+  void _scrollToFocus() {
+    final f = widget.focusUrl;
+    if (f == null || f.isEmpty || _focusScrolled) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = _itemKeys[f]?.currentContext;
+      if (ctx == null) return;
+      _focusScrolled = true;
+      Scrollable.ensureVisible(ctx,
+          alignment: 0.08,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOut);
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     _feed = RadarService.cached();
     _hidden = RadarService.dismissed();
+    final f = widget.focusUrl;
+    if (f != null && f.isNotEmpty) {
+      _expanded.add(f);
+      _showHidden = true;
+    }
     WidgetsBinding.instance.addObserver(this);
     _init();
     // আবেদনের সাইট খুলে অ্যাপ বন্ধ হয়ে গিয়ে থাকলেও ফিরে এসে জিজ্ঞেস করবে
@@ -61,6 +90,7 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -75,6 +105,7 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
     _feed = RadarService.cached();
     await _loadSaved();
     if (mounted) setState(() {});
+    _scrollToFocus();
     // অ্যাপ খুললে: রাতের রিপোর্টের সময় পেরিয়ে থাকলে ও আজকের রিপোর্ট বাকি থাকলে এখনই করে দিই;
     // একেবারে প্রথমবার (ক্যাশ নেই) হলে একবার চালিয়ে দেখাই।
     if (RadarRunner.isDue()) {
@@ -164,6 +195,14 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
       });
     } else {
       list.sort((a, b) => (a.daysLeft ?? 999).compareTo(b.daysLeft ?? 999));
+    }
+    final f = widget.focusUrl;
+    if (f != null && f.isNotEmpty) {
+      final idx = list.indexWhere((i) => i.url == f || i.altUrls.contains(f));
+      if (idx > 0) {
+        final it = list.removeAt(idx);
+        list.insert(0, it);
+      }
     }
     return list;
   }
@@ -262,6 +301,7 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
               : RefreshIndicator(
                   onRefresh: _refresh,
                   child: ListView.builder(
+                    controller: _scroll,
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 90),
                     itemCount: items.length + 2, // [০] সারাংশ+ফিল্টার, শেষে ফাঁকা/খালি বার্তা
@@ -498,6 +538,7 @@ class _RadarTabState extends State<RadarTab> with WidgetsBindingObserver {
     }
 
     return Opacity(
+      key: _keyFor(it.url),
       opacity: hidden ? 0.5 : 1,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),

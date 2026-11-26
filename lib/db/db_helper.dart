@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/project.dart';
@@ -227,6 +228,13 @@ class DBHelper {
           ).toMap(),
         });
       }
+      final checks = await getChecklist(idea.id!);
+      for (final c in checks) {
+        await d.insert('checklist_items', ChecklistItem(
+          ideaId: newIdeaId, text: c.text, done: c.done,
+          sortOrder: c.sortOrder, createdAt: n, updatedAt: n,
+        ).toMap());
+      }
     }
     return newProjectId;
   }
@@ -236,15 +244,30 @@ class DBHelper {
     final ideas = await d.query('ideas', where: 'project_id=?', whereArgs: [id]);
     for (final idea in ideas) {
       await d.delete('idea_files', where: 'idea_id=?', whereArgs: [idea['id']]);
+      await d.delete('checklist_items', where: 'idea_id=?', whereArgs: [idea['id']]);
     }
     await d.delete('ideas', where: 'project_id=?', whereArgs: [id]);
     await d.delete('project_versions', where: 'project_id=?', whereArgs: [id]);
     await d.delete('projects', where: 'id=?', whereArgs: [id]);
   }
 
+  static Future<Project?> getProjectById(int projectId) async {
+    final d = await db;
+    final rows = await d.query('projects', where: 'id=?', whereArgs: [projectId], limit: 1);
+    return rows.isEmpty ? null : Project.fromMap(rows.first);
+  }
+
+  static Future<Idea?> getIdeaById(int ideaId) async {
+    final d = await db;
+    final rows = await d.query('ideas', where: 'id=?', whereArgs: [ideaId], limit: 1);
+    return rows.isEmpty ? null : Idea.fromMap(rows.first);
+  }
+
   static Future<Map<String, int>> getProjectStats(int projectId) async {
     final d = await db;
-    final ideas = await d.query('ideas', where: 'project_id=?', whereArgs: [projectId]);
+    final ideas = await d.query('ideas',
+        where: 'project_id=? AND (is_archived IS NULL OR is_archived=0)',
+        whereArgs: [projectId]);
     final total = ideas.length;
     final done = ideas.where((i) => i['status'] == 'done').length;
     final doing = ideas.where((i) => i['status'] == 'doing').length;
@@ -282,16 +305,31 @@ class DBHelper {
 
   static Future<void> saveProjectVersion(int projectId, int version, String note) async {
     final d = await db;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final maxRows = await d.rawQuery(
+        'SELECT COALESCE(MAX(version),0) AS v FROM project_versions WHERE project_id=?',
+        [projectId]);
+    final projRows = await d.query('projects',
+        columns: ['version'], where: 'id=?', whereArgs: [projectId], limit: 1);
+    final savedMax = (maxRows.first['v'] as int?) ?? 0;
+    final projVersion = projRows.isEmpty ? 0 : ((projRows.first['version'] as int?) ?? 0);
+    final currentMax = savedMax > projVersion ? savedMax : projVersion;
+    final effectiveVersion = version > currentMax ? version : currentMax + 1;
     final ideas = await d.query('ideas', where: 'project_id=?', whereArgs: [projectId]);
-    final snapshot = ideas.toString();
+    final snapshot = jsonEncode({
+      'project_id': projectId,
+      'version': effectiveVersion,
+      'saved_at': now,
+      'ideas': ideas,
+    });
     await d.insert('project_versions', {
       'project_id': projectId,
-      'version': version,
+      'version': effectiveVersion,
       'note': note,
       'snapshot': snapshot,
-      'created_at': DateTime.now().millisecondsSinceEpoch,
+      'created_at': now,
     });
-    await d.update('projects', {'version': version, 'updated_at': DateTime.now().millisecondsSinceEpoch},
+    await d.update('projects', {'version': effectiveVersion, 'updated_at': now},
         where: 'id=?', whereArgs: [projectId]);
   }
 
@@ -301,10 +339,23 @@ class DBHelper {
   static Future<String> ideasSignature() async {
     final d = await db;
     final r = await d.rawQuery(
-        'SELECT COUNT(*) AS c, COALESCE(MAX(updated_at),0) AS m, COALESCE(SUM(updated_at),0) AS s, '
-        'COALESCE(SUM(is_archived),0) AS a FROM ideas');
+        'SELECT '
+        '(SELECT COUNT(*) FROM ideas) AS ic, '
+        '(SELECT COALESCE(MAX(updated_at),0) FROM ideas) AS im, '
+        '(SELECT COALESCE(SUM(updated_at),0) FROM ideas) AS isum, '
+        '(SELECT COALESCE(SUM(is_archived),0) FROM ideas) AS ia, '
+        '(SELECT COUNT(*) FROM projects) AS pc, '
+        '(SELECT COALESCE(MAX(updated_at),0) FROM projects) AS pm, '
+        '(SELECT COUNT(*) FROM idea_files) AS fc, '
+        '(SELECT COALESCE(MAX(updated_at),0) FROM idea_files) AS fm, '
+        '(SELECT COALESCE(SUM(updated_at),0) FROM idea_files) AS fsum, '
+        '(SELECT COUNT(*) FROM checklist_items) AS cc, '
+        '(SELECT COALESCE(MAX(updated_at),0) FROM checklist_items) AS cm, '
+        '(SELECT COALESCE(SUM(done),0) FROM checklist_items) AS cd');
     final row = r.first;
-    return '${row['c']}|${row['m']}|${row['s']}|${row['a']}';
+    return '${row['ic']}|${row['im']}|${row['isum']}|${row['ia']}|'
+        '${row['pc']}|${row['pm']}|${row['fc']}|${row['fm']}|${row['fsum']}|'
+        '${row['cc']}|${row['cm']}|${row['cd']}';
   }
 
   // ── IDEAS ─────────────────────────────────────────────

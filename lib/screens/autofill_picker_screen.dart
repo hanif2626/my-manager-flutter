@@ -196,7 +196,9 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
 
   Set<String> _packageTokens(String pkg) {
     const skip = {'com', 'org', 'net', 'android', 'app', 'apps', 'mobile', 'www',
-      'google', 'the', 'lite', 'main', 'client', 'release', 'io', 'co'};
+      'google', 'the', 'lite', 'main', 'client', 'release', 'io', 'co',
+      'chrome', 'firefox', 'brave', 'opera', 'browser', 'sbrowser',
+      'duckduckgo', 'vivaldi', 'kiwibrowser', 'emmx'};
     return pkg.toLowerCase().split('.')
         .where((t) => t.length >= 4 && !skip.contains(t)).toSet();
   }
@@ -207,6 +209,12 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
     if (_registrableDomain(_hostOf(url)) == _registrableDomain(_hostOf(label))) return true;
     // অ্যাপের প্যাকেজ (com.redotpay.app) বনাম ওয়েব ডোমেইন (redotpay.com):
     // মূল নামটা এক হলে একই সাইট ধরো — নইলে সেভের সময় ডুপ্লিকেট এন্ট্রি হয়।
+    // এই ছাড় শুধু প্যাকেজ-নামের জন্য; ওয়েব ডোমেইনে example.com আর
+    // example.org এক ধরা যাবে না।
+    final parts = label.toLowerCase().split('.');
+    final looksLikePackage = parts.length >= 3 &&
+        const {'com', 'org', 'net', 'io', 'co', 'bd', 'in'}.contains(parts.first);
+    if (!looksLikePackage) return false;
     final la = _registrableDomain(_hostOf(url)).split('.').first;
     final lb = _registrableDomain(_hostOf(label)).split('.').first;
     return la.length >= 4 && la == lb;
@@ -257,7 +265,6 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
     final pkgs = metadata?.packageNames ?? const <String>{};
     final domains = metadata?.webDomains.map((d) => d.domain).toList() ?? const <String>[];
     final wantedDomains = domains.map(_registrableDomain).toSet();
-    final wantedLabels = wantedDomains.map((d) => d.split('.').first).toSet();
     final pkgTokens = <String>{};
     for (final p in pkgs) { pkgTokens.addAll(_packageTokens(p)); }
 
@@ -272,18 +279,19 @@ class _AutofillPickerAppState extends State<AutofillPickerApp> {
     final matches = logins.where((e) {
       final url = (e.url ?? '').toLowerCase();
       final title = e.title.toLowerCase();
+      if (wantedDomains.isNotEmpty) {
+        // ওয়েব ফর্মে শুধু আসল ডোমেইন মিললেই ম্যাচ — ব্রাউজারের প্যাকেজ
+        // টোকেন (chrome ইত্যাদি) বা শিরোনামের আংশিক মিলে ভুল লগইন
+        // অটো-ফিল হবে না। শেখা সংযোগ নিচে আলাদাভাবে যোগ হয়।
+        return url.isNotEmpty &&
+            wantedDomains.contains(_registrableDomain(_hostOf(url)));
+      }
       for (final p in pkgs) {
         final needle = p.toLowerCase();
         if (url.contains(needle) || title.contains(needle)) return true;
       }
       for (final t in pkgTokens) {
         if (url.contains(t) || title.contains(t)) return true;
-      }
-      if (url.isNotEmpty && wantedDomains.isNotEmpty) {
-        if (wantedDomains.contains(_registrableDomain(_hostOf(url)))) return true;
-      }
-      for (final l in wantedLabels) {
-        if (l.length >= 4 && title.contains(l)) return true;
       }
       return false;
     }).toList();

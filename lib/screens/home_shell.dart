@@ -26,6 +26,16 @@ import '../reminder/screens/reminder_screen.dart';
 import '../reminder/services/reminder_service.dart';
 import '../services/notification_service.dart';
 import '../services/data_sync.dart';
+import '../db/db_helper.dart';
+import '../jobs/screens/job_hub_screen.dart';
+import '../jobs/services/job_service.dart';
+import '../today/today_screen.dart';
+import '../backup/backup_center_screen.dart';
+import '../docs/screens/docs_home_screen.dart';
+import '../screentime/screen_time_screen.dart';
+import '../family/screens/family_home_screen.dart';
+import 'idea_detail_screen.dart';
+import 'project_detail_screen.dart';
 import '../services/bubble_window.dart';
 import '../cashbook/services/spending_guard.dart';
 
@@ -60,15 +70,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     DataSync.start();
     ReminderService.openRequest.addListener(_openReminders);
     ReminderService.cashbookOpenRequest.addListener(_openCashbookFromNotification);
+    ReminderService.targetRequest.addListener(_openPendingTarget);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkBubbleTarget();
       _checkLaunchTarget();
-    });
-    ReminderService.launchedFromReminder().then((launched) {
-      if (launched && mounted) _openReminders();
-    });
-    ReminderService.launchedFromCashbook().then((launched) {
-      if (launched && mounted) _openCashbook();
+      _checkNotificationTarget();
     });
   }
 
@@ -95,14 +101,192 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   bool _reminderOpen = false;
+  bool _targetOpen = false;
 
-  /// Tapping a reminder notification's body opens the Reminder screen.
-  Future<void> _openReminders() async {
+  Future<void> _checkNotificationTarget() async {
+    if (BubbleWindow.isBubble || !mounted) return;
+    final t = await ReminderService.launchedTarget();
+    if (t == null || !mounted) return;
+    await _openTarget(t);
+  }
+
+  void _openPendingTarget() {
+    final t = ReminderService.pendingTarget;
+    if (t == null) return;
+    ReminderService.pendingTarget = null;
+    _openTarget(t);
+  }
+
+  Future<void> _openTarget(String target) async {
+    if (_targetOpen || !mounted) return;
+    _targetOpen = true;
+    try {
+      if (target.startsWith('rem|')) {
+        final parts = target.split('|');
+        await _openReminderOrCircular(
+            parts.length > 1 ? int.tryParse(parts[1]) : null);
+        return;
+      }
+      if (target == 'cashbook_evening' || target == 'cashbook_guard') {
+        await _openCashbookFromNotification();
+        return;
+      }
+      final nav = Navigator.of(context);
+      nav.popUntil((r) => r.isFirst);
+      if (target == 'today_digest') {
+        setState(() => _index = 0);
+        await nav.push(MaterialPageRoute(
+            builder: (_) => TodayScreen(onOpen: _openFromTodayNotification)));
+      } else if (target == 'vault_backup') {
+        await nav.push(
+            MaterialPageRoute(builder: (_) => const BackupCenterScreen()));
+      } else if (target == 'job_radar') {
+        await nav.push(MaterialPageRoute(
+            builder: (_) => JobHubScreen(onOpenVault: _openVault, initialTab: 0)));
+      } else if (target.startsWith('job_item|')) {
+        final url = Uri.decodeComponent(target.substring('job_item|'.length));
+        await nav.push(MaterialPageRoute(
+            builder: (_) => JobHubScreen(
+                onOpenVault: _openVault, initialTab: 0, focusRadarUrl: url)));
+      } else if (target.startsWith('job_admit')) {
+        final parts = target.split('|');
+        final id = parts.length > 1 ? int.tryParse(parts[1]) : null;
+        await nav.push(MaterialPageRoute(
+            builder: (_) => JobHubScreen(
+                onOpenVault: _openVault,
+                initialTab: 2,
+                focusCircularId: id,
+                focusCircularAction: 'admit')));
+      } else if (target.startsWith('idea_')) {
+        await _openIdeaById(int.tryParse(target.substring(5)));
+      } else if (target.startsWith('project_')) {
+        final id = int.tryParse(target.substring(8));
+        // পুরনো নোটিফিকেশনে project_<ideaId+1000> থাকতে পারে।
+        if (id != null && id > 1000) {
+          await _openIdeaById(id - 1000);
+        } else {
+          await _openProjectById(id);
+        }
+      }
+    } finally {
+      _targetOpen = false;
+    }
+  }
+
+  void _openFromTodayNotification(BuildContext todayCtx, String module, int tab) {
+    switch (module) {
+      case 'প্রজেক্ট':
+        Navigator.pop(todayCtx);
+        setState(() => _index = 1);
+        return;
+      case 'ক্যাশবুক':
+        Navigator.pop(todayCtx);
+        _openCashbook();
+        return;
+      case 'ভল্ট':
+        Navigator.pop(todayCtx);
+        _openVault();
+        return;
+      case 'রিমাইন্ডার':
+        Navigator.push(todayCtx,
+            MaterialPageRoute(builder: (_) => const ReminderScreen()));
+        return;
+      case 'চাকরি হাব':
+        Navigator.push(
+            todayCtx,
+            MaterialPageRoute(
+                builder: (_) =>
+                    JobHubScreen(onOpenVault: _openVault, initialTab: tab)));
+        return;
+      case 'পরিবার':
+        Navigator.push(
+            todayCtx,
+            MaterialPageRoute(
+                builder: (_) =>
+                    FamilyHomeScreen(onOpenVault: _openVault, initialTab: tab)));
+        return;
+      case 'ব্যাকআপ':
+        Navigator.push(todayCtx,
+            MaterialPageRoute(builder: (_) => const BackupCenterScreen()));
+        return;
+      case 'ডকুমেন্ট ও তথ্য':
+        Navigator.push(todayCtx,
+            MaterialPageRoute(builder: (_) => const DocsHomeScreen()));
+        return;
+      case 'স্ক্রিন টাইম':
+        Navigator.push(todayCtx,
+            MaterialPageRoute(builder: (_) => const ScreenTimeScreen()));
+        return;
+    }
+  }
+
+  Future<void> _openReminderOrCircular(int? reminderId) async {
+    if (reminderId != null) {
+      try {
+        final circulars = await JobService.circulars();
+        for (final c in circulars) {
+          if (c.deadlineRem.contains(reminderId) ||
+              c.examRem.contains(reminderId)) {
+            if (!mounted) return;
+            final nav = Navigator.of(context);
+            nav.popUntil((r) => r.isFirst);
+            await nav.push(MaterialPageRoute(
+                builder: (_) => JobHubScreen(
+                    onOpenVault: _openVault,
+                    initialTab: 2,
+                    focusCircularId: c.id,
+                    focusCircularAction: 'sheet')));
+            return;
+          }
+        }
+      } catch (_) {}
+    }
+    await _openReminderScreen();
+  }
+
+  Future<void> _openReminderScreen() async {
     if (_reminderOpen || !mounted) return;
     _reminderOpen = true;
-    await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const ReminderScreen()));
+    final nav = Navigator.of(context);
+    nav.popUntil((r) => r.isFirst);
+    await nav.push(MaterialPageRoute(builder: (_) => const ReminderScreen()));
     _reminderOpen = false;
+  }
+
+  Future<void> _openIdeaById(int? ideaId) async {
+    if (ideaId == null || !mounted) return;
+    final idea = await DBHelper.getIdeaById(ideaId);
+    if (idea == null || !mounted) return;
+    final project = await DBHelper.getProjectById(idea.projectId);
+    if (project == null || !mounted) return;
+    if (project.isLocked) {
+      final ok = await AuthService.authenticate(
+          reason: '"${project.name}" লক করা — যাচাই করো');
+      if (!ok || !mounted) return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => IdeaDetailScreen(idea: idea, project: project)));
+  }
+
+  Future<void> _openProjectById(int? projectId) async {
+    if (projectId == null || !mounted) return;
+    final project = await DBHelper.getProjectById(projectId);
+    if (project == null || !mounted) return;
+    if (project.isLocked) {
+      final ok = await AuthService.authenticate(
+          reason: '"${project.name}" লক করা — যাচাই করো');
+      if (!ok || !mounted) return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ProjectDetailScreen(project: project)));
+  }
+
+  /// Tapping a reminder notification's body opens the Reminder screen,
+  /// অথবা রিমাইন্ডারটা সার্কুলারের হলে সরাসরি সেই সার্কুলার।
+  Future<void> _openReminders() async {
+    final id = ReminderService.pendingReminderId;
+    ReminderService.pendingReminderId = null;
+    await _openReminderOrCircular(id);
   }
 
   /// "Share TO My Manager" — content shared in from other apps (browser,
@@ -143,6 +327,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     ReminderService.openRequest.removeListener(_openReminders);
     ReminderService.cashbookOpenRequest.removeListener(_openCashbookFromNotification);
+    ReminderService.targetRequest.removeListener(_openPendingTarget);
     _shareSub?.cancel();
     super.dispose();
   }

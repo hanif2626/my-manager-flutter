@@ -178,18 +178,29 @@ class ScreenTimeService {
   // ───────────── ব্যবহারের হিসাব ─────────────
 
   static Future<List<AppUse>> usage(DateTime start, DateTime end) async {
-    final raw = await _ch.invokeMethod<List<dynamic>>('usage', {
-      'start': start.millisecondsSinceEpoch,
-      'end': end.millisecondsSinceEpoch,
-    });
-    final o = _overrides();
-    return (raw ?? const [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .map((m) {
-          final pkg = m['package'] as String;
-          return AppUse(pkg, (m['label'] as String?) ?? pkg, (m['ms'] as num).toInt(), o[pkg] ?? defaultCategory(pkg));
-        })
-        .toList();
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('usage', {
+        'start': start.millisecondsSinceEpoch,
+        'end': end.millisecondsSinceEpoch,
+      });
+      final o = _overrides();
+      final out = <AppUse>[];
+      for (final e in raw ?? const []) {
+        try {
+          final m = Map<String, dynamic>.from(e as Map);
+          final pkg = (m['package'] ?? '').toString();
+          if (pkg.isEmpty) continue;
+          out.add(AppUse(
+              pkg,
+              (m['label'] ?? pkg).toString(),
+              (m['ms'] as num?)?.toInt() ?? 0,
+              o[pkg] ?? defaultCategory(pkg)));
+        } catch (_) {}
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// [day] দিনের মোট: ২৪ ঘণ্টা (আজ হলে এখন পর্যন্ত)।

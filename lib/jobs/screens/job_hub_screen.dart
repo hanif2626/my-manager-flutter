@@ -18,7 +18,24 @@ class JobHubScreen extends StatefulWidget {
   final VoidCallback onOpenVault;
   /// কোন ট্যাবে খুলবে (০ ওভারভিউ, ১ সার্কুলার, ২ ডকুমেন্ট) — আজকের ম্যানেজার থেকে আসে।
   final int initialTab;
-  const JobHubScreen({super.key, required this.onOpenVault, this.initialTab = 0});
+
+  /// নোটিফিকেশন থেকে এলে: রাডারের এই সার্কুলারটা সামনে/খোলা দেখাবে।
+  final String? focusRadarUrl;
+
+  /// নোটিফিকেশন থেকে এলে: সেভ করা এই সার্কুলারটা সরাসরি খুলবে।
+  final int? focusCircularId;
+
+  /// 'admit' হলে প্রবেশপত্রের লিংক, নইলে সার্কুলারের শিট খুলবে।
+  final String? focusCircularAction;
+
+  const JobHubScreen({
+    super.key,
+    required this.onOpenVault,
+    this.initialTab = 0,
+    this.focusRadarUrl,
+    this.focusCircularId,
+    this.focusCircularAction,
+  });
   @override State<JobHubScreen> createState() => _JobHubScreenState();
 }
 
@@ -29,6 +46,7 @@ class _JobHubScreenState extends State<JobHubScreen> with SingleTickerProviderSt
   List<Circular> _circulars = [];
   List<JobDoc> _docs = [];
   bool _loading = true;
+  bool _focusHandled = false;
   bool _bkBusy = false;
   String? _bkStatus;
   bool _bkError = false;
@@ -51,6 +69,30 @@ class _JobHubScreenState extends State<JobHubScreen> with SingleTickerProviderSt
     final c = await JobService.circulars();
     final d = await JobService.docs();
     if (mounted) setState(() { _circulars = c; _docs = d; _loading = false; });
+    if (mounted && widget.focusCircularId != null && !_focusHandled) {
+      _focusHandled = true;
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _openFocusedCircular());
+    }
+  }
+
+  Future<void> _openFocusedCircular() async {
+    if (!mounted) return;
+    Circular? found;
+    for (final c in _circulars) {
+      if (c.id == widget.focusCircularId) {
+        found = c;
+        break;
+      }
+    }
+    if (found == null) return;
+    _tab.animateTo(2);
+    if (widget.focusCircularAction == 'admit' &&
+        AdmitWatcher.info(found.id)?['found'] == true) {
+      await _openAdmit(found);
+    } else {
+      await _circularSheet(existing: found);
+    }
   }
 
   void _snack(String m) {
@@ -150,7 +192,12 @@ class _JobHubScreenState extends State<JobHubScreen> with SingleTickerProviderSt
           ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
           : TabBarView(
               controller: _tab,
-              children: [RadarTab(onSaved: _load), _overview(), _circularTab(), _docTab()],
+              children: [
+                RadarTab(onSaved: _load, focusUrl: widget.focusRadarUrl),
+                _overview(),
+                _circularTab(),
+                _docTab()
+              ],
             ),
     );
   }

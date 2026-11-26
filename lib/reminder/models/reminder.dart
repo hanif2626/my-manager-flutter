@@ -47,8 +47,15 @@ const reminderRepeats = {
 
 (int, int) parseHm(String s) {
   final p = s.split(':');
-  return (int.parse(p[0]), int.parse(p[1]));
+  final h = p.isNotEmpty ? (int.tryParse(p[0].trim()) ?? 8) : 8;
+  final m = p.length > 1 ? (int.tryParse(p[1].trim()) ?? 0) : 0;
+  return (h.clamp(0, 23), m.clamp(0, 59));
 }
+
+int _lastDayOfMonth(int year, int month) => DateTime(year, month + 1, 0).day;
+
+int _clampDay(int year, int month, int day) =>
+    day.clamp(1, _lastDayOfMonth(year, month));
 
 String hmString(int h, int m) =>
     '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
@@ -115,7 +122,10 @@ class Reminder {
 
   static DateTime parseYmd(String s) {
     final p = s.split('-');
-    return DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+    final y = p.isNotEmpty ? (int.tryParse(p[0].trim()) ?? 2000) : 2000;
+    final m = (p.length > 1 ? (int.tryParse(p[1].trim()) ?? 1) : 1).clamp(1, 12);
+    final d = p.length > 2 ? (int.tryParse(p[2].trim()) ?? 1) : 1;
+    return DateTime(y, m, _clampDay(y, m, d));
   }
 
   Map<String, dynamic> toMap() => {
@@ -159,10 +169,12 @@ class Reminder {
       case 'weekly':
         return d.weekday == start.weekday;
       case 'monthly':
-        return d.day == start.day;
+        // ৩১ তারিখের রিমাইন্ডার ছোট মাসে মাসের শেষ দিনে আসবে — হারাবে না।
+        return d.day == _clampDay(d.year, d.month, start.day);
       case 'yearly':
-        // ২৯ ফেব্রুয়ারির তারিখ লিপ-ইয়ার ছাড়া আসে না — সাধারণ ক্ষেত্রে সমস্যা নেই।
-        return d.month == start.month && d.day == start.day;
+        // ২৯ ফেব্রুয়ারি লিপ-ইয়ার ছাড়া ২৮ ফেব্রুয়ারিতে আসবে।
+        return d.month == start.month &&
+            d.day == _clampDay(d.year, d.month, start.day);
       default:
         return d == start;
     }

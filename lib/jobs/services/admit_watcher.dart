@@ -193,7 +193,6 @@ class AdmitWatcher {
       if (c.deadline != null && DateTime.now().difference(c.deadline!).inDays > 150) return false;
       return true;
     }).take(8).toList();
-    await SettingsService.setInt(_kLast, now);
     var checked = 0;
     var found = 0;
     for (final c in list) {
@@ -204,6 +203,7 @@ class AdmitWatcher {
       } catch (_) {}
       await Future<void>.delayed(const Duration(milliseconds: 600));
     }
+    await SettingsService.setInt(_kLast, now);
     return (checked: checked, found: found);
   }
 

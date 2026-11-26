@@ -371,7 +371,11 @@ class RadarRunner {
     if (seeded && notify && (fresh.isNotEmpty || extended.isNotEmpty)) {
       try {
         final m = _composeInstant(fresh, extended);
-        await NotificationService.showRadarNew(m.title, m.short, m.big);
+        final single = fresh.length + extended.length == 1
+            ? (fresh.isNotEmpty ? fresh.first : extended.first)
+            : null;
+        await NotificationService.showRadarNew(m.title, m.short, m.big,
+            focusUrl: single?.url);
       } catch (_) {}
     }
 
@@ -478,7 +482,7 @@ class RadarRunner {
         .toList()
       ..sort((a, b) => a.deadline!.compareTo(b.deadline!));
 
-    final msgs = <({DateTime when, String title, String body, String big})>[];
+    final msgs = <({DateTime when, String title, String body, String big, String url})>[];
     for (final i in items.take(30)) {
       final dl = DateTime(i.deadline!.year, i.deadline!.month, i.deadline!.day);
       final name = i.org.isNotEmpty ? i.org : i.title;
@@ -496,7 +500,7 @@ class RadarRunner {
           if (i.method.isNotEmpty) '📝 ${i.method}',
           'রাডারে "📄 বিজ্ঞপ্তি PDF" চেপে এক ট্যাপে বিজ্ঞপ্তি দেখো।',
         ];
-        msgs.add((when: when, title: title, body: body, big: lines.join('\n')));
+        msgs.add((when: when, title: title, body: body, big: lines.join('\n'), url: i.url));
       }
     }
     await NotificationService.scheduleRadarDeadlineAlarms(msgs);

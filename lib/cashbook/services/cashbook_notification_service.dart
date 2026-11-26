@@ -219,7 +219,7 @@ class CashbookNotificationService {
       category: AndroidNotificationCategory.reminder,
       styleInformation: BigTextStyleInformation(body, contentTitle: title),
     );
-    await _plugin.show(7800, title, body.split('\n').first, NotificationDetails(android: details));
+    await _plugin.show(7800, title, body.split('\n').first, NotificationDetails(android: details), payload: 'cashbook_guard');
   }
 
   // ───────────── স্থায়ী নোটিফিকেশন-বার সতর্কতা (আইডি ৭৮২০) ─────────────
@@ -245,7 +245,7 @@ class CashbookNotificationService {
       autoCancel: false,
       styleInformation: BigTextStyleInformation(body, contentTitle: title),
     );
-    await _plugin.show(_guardOngoingId, title, body.split('\n').first, NotificationDetails(android: details));
+    await _plugin.show(_guardOngoingId, title, body.split('\n').first, NotificationDetails(android: details), payload: 'cashbook_guard');
   }
 
   static Future<void> cancelGuardOngoing() async {
@@ -291,6 +291,7 @@ class CashbookNotificationService {
         NotificationDetails(android: details),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        payload: 'cashbook_guard',
       );
     }
   }

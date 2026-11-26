@@ -66,7 +66,8 @@ class VaultBackupReminder {
         autoCancel: false,
       );
       await _plugin.show(
-          _notifId, '🔐 ভল্টের backup বাকি', body, const NotificationDetails(android: details));
+          _notifId, '🔐 ভল্টের backup বাকি', body, const NotificationDetails(android: details),
+          payload: 'vault_backup');
     } catch (_) {
       // সতর্কতা বসানো ব্যর্থ হলে অ্যাপের কাজ থামবে না — ভল্ট স্ক্রিনের
       // ব্যানার তো আছেই।

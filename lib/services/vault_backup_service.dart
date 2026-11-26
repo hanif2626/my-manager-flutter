@@ -242,7 +242,8 @@ class VaultBackupService {
     return utf8.decode(clear);
   }
 
-  static Future<List<VaultEntry>> _decrypt(String text, String password) async {
+  static Future<List<VaultEntry>> _decrypt(String text, String password,
+      {bool lenient = false}) async {
     final Map<String, dynamic> env;
     try {
       env = jsonDecode(text) as Map<String, dynamic>;
@@ -265,9 +266,29 @@ class VaultBackupService {
     }
     try {
       final data = jsonDecode(clear) as Map<String, dynamic>;
-      return (data['entries'] as List)
-          .map((e) => VaultEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-          .toList();
+      final rawEntries = data['entries'];
+      if (rawEntries is! List) {
+        throw VaultBackupException('ব্যাকআপের ভেতরের ডাটা পড়া যায়নি');
+      }
+      if (!lenient) {
+        return rawEntries
+            .map((e) => VaultEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+      final out = <VaultEntry>[];
+      for (final e in rawEntries) {
+        try {
+          out.add(VaultEntry.fromJson(Map<String, dynamic>.from(e as Map)));
+        } catch (_) {
+          // রিস্টোরে একটা বিকৃত এন্ট্রি বাদ যাবে; বাকিগুলো ফিরবে।
+        }
+      }
+      if (out.isEmpty && rawEntries.isNotEmpty) {
+        throw VaultBackupException('ব্যাকআপের ভেতরের ডাটা পড়া যায়নি');
+      }
+      return out;
+    } on VaultBackupException {
+      rethrow;
     } catch (_) {
       throw VaultBackupException('ব্যাকআপের ভেতরের ডাটা পড়া যায়নি');
     }
@@ -442,7 +463,7 @@ class VaultBackupService {
   /// এনক্রিপ্টেড টেক্সট ডিক্রিপ্ট করে বর্তমান ভল্টে মার্জ করে। বর্তমান
   /// এন্ট্রি কখনো মুছে না — শুধু যোগ/আপডেট।
   static Future<VaultRestoreResult> restoreFromText(String text, String password) async {
-    final entries = await _decrypt(text, password);
+    final entries = await _decrypt(text, password, lenient: true);
     final r = await VaultService.mergeMany(entries);
     return VaultRestoreResult(r[0], r[1], r[2], entries.length);
   }

@@ -120,8 +120,10 @@ class CashbookDB {
 
   static Future<void> deleteAccount(int id) async {
     final d = await db;
-    await d.delete('entries', where: 'account_id=?', whereArgs: [id]);
-    await d.delete('accounts', where: 'id=?', whereArgs: [id]);
+    await d.transaction((txn) async {
+      await txn.delete('entries', where: 'account_id=?', whereArgs: [id]);
+      await txn.delete('accounts', where: 'id=?', whereArgs: [id]);
+    });
   }
 
   static Future<void> renameAccount(int id, String newName) async {
@@ -241,18 +243,19 @@ class CashbookDB {
     final all = await getEntries();
     final thisMonth = todayIso().substring(0, 7);
     final recurringSources = all.where((e) => e.recurring && e.monthKey != thisMonth);
+    String sigOf(CashbookEntry e) =>
+        '${e.accountId}|${e.category}|${e.note}|${e.type}|${e.amount.toStringAsFixed(2)}';
     final latestBySignature = <String, CashbookEntry>{};
     for (final e in recurringSources) {
-      final sig = '${e.accountId}|${e.category}|${e.note}|${e.type}';
+      final sig = sigOf(e);
       final prev = latestBySignature[sig];
       if (prev == null || e.date.compareTo(prev.date) > 0) latestBySignature[sig] = e;
     }
     int created = 0;
     for (final src in latestBySignature.values) {
-      final sig = '${src.accountId}|${src.category}|${src.note}|${src.type}';
+      final sig = sigOf(src);
       final alreadyThisMonth = all.any((e) =>
-          e.monthKey == thisMonth &&
-          '${e.accountId}|${e.category}|${e.note}|${e.type}' == sig);
+          e.monthKey == thisMonth && sigOf(e) == sig);
       if (!alreadyThisMonth) {
         final n = DateTime.now().millisecondsSinceEpoch;
         try {

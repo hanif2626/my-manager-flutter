@@ -45,6 +45,20 @@ class ReminderService {
   /// করলে HomeShell এটা দেখে ক্যাশবুক খোলে।
   static final ValueNotifier<int> cashbookOpenRequest = ValueNotifier(0);
 
+  /// নোটিফিকেশনে ট্যাপ করে সরাসরি যাওয়ার গন্তব্য (payload)। HomeShell
+  /// [targetRequest] শুনে [pendingTarget] পড়ে সংশ্লিষ্ট স্ক্রিন/সার্কুলার খোলে।
+  static String? pendingTarget;
+  static final ValueNotifier<int> targetRequest = ValueNotifier(0);
+
+  /// শেষ ট্যাপ করা রিমাইন্ডারের id — সার্কুলারের রিমাইন্ডার হলে HomeShell
+  /// রিমাইন্ডার স্ক্রিনের বদলে সরাসরি সেই সার্কুলার খোলে।
+  static int? pendingReminderId;
+
+  static void _requestTarget(String target) {
+    pendingTarget = target;
+    targetRequest.value++;
+  }
+
   static int _baseId(int reminderId) => 100000000 + (reminderId % 1000000) * 1000;
   static int _snoozeId(int reminderId) => _baseId(reminderId) + 999;
 
@@ -76,12 +90,24 @@ class ReminderService {
 
   static Future<void> handleResponse(NotificationResponse r) async {
     final p = r.payload;
-    if (p == 'cashbook_evening') {
-      if (r.notificationResponseType ==
-          NotificationResponseType.selectedNotification) {
-        cashbookOpenRequest.value++;
-      }
+    final bodyTap = r.actionId == null &&
+        r.notificationResponseType ==
+            NotificationResponseType.selectedNotification;
+    if (p == 'cashbook_evening' || p == 'cashbook_guard') {
+      if (bodyTap) cashbookOpenRequest.value++;
       return;
+    }
+    if (p != null && bodyTap) {
+      if (p == 'job_radar' ||
+          p.startsWith('job_item|') ||
+          p.startsWith('job_admit') ||
+          p == 'today_digest' ||
+          p == 'vault_backup' ||
+          p.startsWith('idea_') ||
+          p.startsWith('project_')) {
+        _requestTarget(p);
+        return;
+      }
     }
     if (p == null || !p.startsWith('rem|')) return;
     final parts = p.split('|');
@@ -98,21 +124,36 @@ class ReminderService {
       await snooze(id, date);
     } else if (r.notificationResponseType ==
         NotificationResponseType.selectedNotification) {
+      pendingReminderId = id;
       openRequest.value++;
     }
   }
 
   /// অ্যাপ ক্যাশবুকের সন্ধ্যার সতর্কতায় ট্যাপ করে কোল্ড-স্টার্ট হয়েছিল কি না।
   static Future<bool> launchedFromCashbook() async {
+    final p = await launchedTarget();
+    return p == 'cashbook_evening' || p == 'cashbook_guard';
+  }
+
+  /// কোল্ড-স্টার্টে নোটিফিকেশনের বডিতে ট্যাপ হয়ে থাকলে সেই payload —
+  /// HomeShell এটা দিয়ে সরাসরি সংশ্লিষ্ট স্ক্রিন/সার্কুলার খোলে।
+  static Future<String?> launchedTarget() async {
     try {
       await ensureReady();
       final d = await _plugin.getNotificationAppLaunchDetails();
-      return (d?.didNotificationLaunchApp ?? false) &&
-          d?.notificationResponse?.payload == 'cashbook_evening' &&
-          d?.notificationResponse?.actionId == null;
+      if (!(d?.didNotificationLaunchApp ?? false)) return null;
+      if (d?.notificationResponse?.actionId != null) return null;
+      return d?.notificationResponse?.payload;
     } catch (_) {
-      return false;
+      return null;
     }
+  }
+
+  static Future<int?> launchedReminderId() async {
+    final p = await launchedTarget();
+    if (p == null || !p.startsWith('rem|')) return null;
+    final parts = p.split('|');
+    return parts.length > 1 ? int.tryParse(parts[1]) : null;
   }
 
   /// অ্যাপ নোটিফিকেশনে ট্যাপ করে কোল্ড-স্টার্ট হয়েছিল কি না।
